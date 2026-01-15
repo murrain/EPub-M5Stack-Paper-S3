@@ -17,6 +17,7 @@
 #include "viewers/menu_viewer.hpp"
 #include "viewers/form_viewer.hpp"
 #include "viewers/msg_viewer.hpp"
+#include "viewers/book_viewer.hpp"
 
 #if EPUB_INKPLATE_BUILD && !BOARD_TYPE_PAPER_S3
   #include "esp_system.h"
@@ -189,21 +190,66 @@ wifi_mode()
 static void
 power_off()
 {
-  books_dir_controller.save_last_book(book_controller.get_current_page_id(), true); 
-  
+  books_dir_controller.save_last_book(book_controller.get_current_page_id(), true);
+
   CommonActions::power_it_off();
+}
+
+// Jump to page functionality
+static uint16_t target_page_number = 1;
+
+static FormEntry jump_to_page_form_entry = {
+  .caption = "Page Number:",
+  .u = { .val = { .value = &target_page_number,
+                  .min   = 1,
+                  .max   = 1 } }, // max will be updated dynamically
+  .entry_type = FormEntryType::UINT16
+};
+
+static void
+jump_to_page()
+{
+  int16_t page_count = page_locs.get_page_count();
+
+  if (page_count <= 0) {
+    msg_viewer.show(MsgViewer::MsgType::INFO,
+                    false, false,
+                    "Jump to Page",
+                    "Pages are still being computed. Please wait.");
+    return;
+  }
+
+  // Get current page for default value
+  const PageLocs::PageId & current_page_id = book_controller.get_current_page_id();
+  int16_t current_page = page_locs.get_page_nbr(current_page_id);
+  if (current_page >= 0) {
+    target_page_number = static_cast<uint16_t>(current_page + 1); // +1 because UI shows 1-based
+  }
+  else {
+    target_page_number = 1;
+  }
+
+  // Update form max value to actual page count
+  jump_to_page_form_entry.u.val.max = static_cast<uint16_t>(page_count);
+
+  // Show the form
+  form_viewer.show(&jump_to_page_form_entry, 1,
+                   "(Enter page number to jump to)");
+
+  book_param_controller.set_jump_to_page_form_is_shown();
 }
 
 // IMPORTANT!!
 // The first (menu[0]) and the last menu entry (the one before END_MENU) MUST ALWAYS BE VISIBLE!!!
 
-static MenuViewer::MenuEntry menu[10] = {
+static MenuViewer::MenuEntry menu[11] = {
   { MenuViewer::Icon::RETURN,      "Return to the e-books reader",         CommonActions::return_to_last, true , true },
   { MenuViewer::Icon::TOC,         "Table of Content",                     toc_ctrl                     , false, true },
+  { MenuViewer::Icon::BOOK,        "Jump to Page Number",                  jump_to_page                 , true , true },
   { MenuViewer::Icon::BOOK_LIST,   "E-Books list",                         books_list                   , true , true },
   { MenuViewer::Icon::FONT_PARAMS, "Current e-book parameters",            book_parameters              , true , true },
   { MenuViewer::Icon::REVERT,      "Revert e-book parameters to "
-                                   "default values",                       revert_to_defaults           , true , true },  
+                                   "default values",                       revert_to_defaults           , true , true },
   { MenuViewer::Icon::DELETE,      "Delete the current e-book",            delete_book                  , true , true },
   { MenuViewer::Icon::WIFI,        "WiFi Access to the e-books folder",    wifi_mode                    , true , true },
   { MenuViewer::Icon::INFO,        "About the EPub-InkPlate application",  CommonActions::about         , true , true },
@@ -266,6 +312,35 @@ BookParamController::input_event(const EventMgr::Event & event)
           fonts.adjust_default_font(font);
         }
      // }
+      menu_viewer.clear_highlight();
+    }
+  }
+  else if (jump_to_page_form_is_shown) {
+    if (form_viewer.event(event)) {
+      jump_to_page_form_is_shown = false;
+
+      // Convert page number (1-based) to 0-based for internal use
+      int16_t target_page_nbr = static_cast<int16_t>(target_page_number) - 1;
+
+      // Find the PageId that corresponds to this page number
+      const PageLocs::PageId * page_id_ptr = page_locs.get_page_id_from_page_nbr(target_page_nbr);
+
+      if (page_id_ptr != nullptr) {
+        // Navigate to the target page
+        book_controller.set_current_page_id(*page_id_ptr);
+        book_viewer.show_page(*page_id_ptr);
+
+        // Return to book reading
+        app_controller.set_controller(AppController::Ctrl::BOOK);
+      }
+      else {
+        msg_viewer.show(MsgViewer::MsgType::INFO,
+                        false, false,
+                        "Jump to Page",
+                        "Page %d could not be found. Please try again.",
+                        target_page_number);
+      }
+
       menu_viewer.clear_highlight();
     }
   }

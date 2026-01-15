@@ -159,9 +159,25 @@ class PageLocs
 
     inline int16_t get_page_nbr(const PageId & id) {
       std::scoped_lock guard(mutex);
-      if (!completed) return -1; 
+      if (!completed) return -1;
       const PageInfo * info = get_page_info(id);
       return info == nullptr ? -1 : info->page_number;
+    };
+
+    /**
+     * @brief Get PageId from page number (0-based)
+     * @param page_nbr The page number (0-based)
+     * @return Pointer to PageId if found, nullptr otherwise
+     */
+    inline const PageId * get_page_id_from_page_nbr(int16_t page_nbr) {
+      std::scoped_lock guard(mutex);
+      if (!completed) return nullptr;
+      for (const auto & entry : pages_map) {
+        if (entry.second.page_number == page_nbr) {
+          return &entry.first;
+        }
+      }
+      return nullptr;
     };
 };
 
