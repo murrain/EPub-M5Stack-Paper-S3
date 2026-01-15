@@ -1,0 +1,134 @@
+name: CI Build and Test
+
+on:
+  push:
+    branches: [ master, develop, 'feature/**', 'refactor/**', 'test/**' ]
+  pull_request:
+    branches: [ master, develop ]
+
+jobs:
+  # Linux build and test (fastest, runs on every commit)
+  linux-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Cache PlatformIO
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.platformio
+          ~/.cache/pip
+        key: ${{ runner.os }}-pio-${{ hashFiles('**/platformio.ini') }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install PlatformIO
+      run: |
+        python -m pip install --upgrade pip
+        pip install platformio
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libgtk-3-dev \
+          libfreetype6-dev \
+          pkg-config \
+          lcov
+
+    - name: Build Linux release
+      run: pio run -e linux_release
+
+    - name: Run tests
+      run: pio test -e linux_tests
+
+    # TODO: Add code coverage when tests expand
+    # - name: Generate coverage report
+    #   run: |
+    #     lcov --capture --directory .pio/build/linux_tests --output-file coverage.info
+    #     lcov --remove coverage.info '/usr/*' --output-file coverage.info
+    #     lcov --list coverage.info
+
+    # - name: Upload coverage to Codecov
+    #   uses: codecov/codecov-action@v4
+    #   with:
+    #     file: ./coverage.info
+
+  # ESP32 Paper S3 build (ensures hardware target compiles)
+  esp32-paper-s3-build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Cache PlatformIO
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.platformio
+          ~/.cache/pip
+        key: ${{ runner.os }}-pio-esp32-${{ hashFiles('**/platformio.ini') }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install PlatformIO
+      run: |
+        python -m pip install --upgrade pip
+        pip install platformio
+
+    - name: Build Paper S3 firmware
+      run: pio run -e paper_s3
+
+    - name: Upload firmware artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: paper-s3-firmware
+        path: .pio/build/paper_s3/firmware.bin
+        retention-days: 30
+
+  # Code quality checks
+  code-quality:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install clang-format
+      run: sudo apt-get install -y clang-format
+
+    # TODO: Add .clang-format file and enable this
+    # - name: Check code formatting
+    #   run: |
+    #     find src include -name "*.cpp" -o -name "*.hpp" | \
+    #       xargs clang-format --dry-run --Werror
+
+    - name: Check for common issues
+      run: |
+        echo "Checking for debug prints..."
+        ! grep -rn "printf\|std::cout" src/ include/ || echo "Found debug prints (warning only)"
+
+        echo "Checking for TODO/FIXME..."
+        grep -rn "TODO\|FIXME" src/ include/ || echo "No TODOs found"
+
+    - name: Count lines of code
+      run: |
+        if command -v cloc &> /dev/null; then
+          cloc src include --exclude-dir=.pio
+        else
+          echo "cloc not available, skipping"
+        fi
