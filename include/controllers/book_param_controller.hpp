@@ -13,12 +13,14 @@ class BookParamController
     static constexpr char const * TAG = "BookParamController";
 
     bool book_params_form_is_shown;
+    bool jump_to_page_form_is_shown;
     bool wait_for_key_after_wifi;
     bool delete_current_book;
 
   public:
-    BookParamController() : 
-      book_params_form_is_shown(false), 
+    BookParamController() :
+      book_params_form_is_shown(false),
+      jump_to_page_form_is_shown(false),
         wait_for_key_after_wifi(false),
             delete_current_book(false) { };
 
@@ -27,9 +29,10 @@ class BookParamController
     void          leave(bool going_to_deep_sleep = false);
     void set_font_count(uint8_t count);
 
-    inline void set_book_params_form_is_shown() { book_params_form_is_shown = true; }
-    inline void   set_wait_for_key_after_wifi() { wait_for_key_after_wifi   = true; }
-    inline void       set_delete_current_book() { delete_current_book       = true; }
+    inline void    set_book_params_form_is_shown() { book_params_form_is_shown    = true; }
+    inline void set_jump_to_page_form_is_shown() { jump_to_page_form_is_shown = true; }
+    inline void      set_wait_for_key_after_wifi() { wait_for_key_after_wifi      = true; }
+    inline void          set_delete_current_book() { delete_current_book          = true; }
 };
 
 #if __BOOK_PARAM_CONTROLLER__
