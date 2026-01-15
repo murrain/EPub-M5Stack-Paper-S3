@@ -326,11 +326,10 @@ BookParamController::input_event(const EventMgr::Event & event)
       const PageLocs::PageId * page_id_ptr = page_locs.get_page_id_from_page_nbr(target_page_nbr);
 
       if (page_id_ptr != nullptr) {
-        // Navigate to the target page
+        // Set the target page - the book controller will display it when we return
         book_controller.set_current_page_id(*page_id_ptr);
-        book_viewer.show_page(*page_id_ptr);
 
-        // Return to book reading
+        // Return to book controller - it will call book_viewer.show_page() in enter()
         app_controller.set_controller(AppController::Ctrl::BOOK);
       }
       else {
