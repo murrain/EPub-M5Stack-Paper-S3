@@ -14,6 +14,7 @@
 #include "viewers/book_viewer.hpp"
 #include "viewers/page.hpp"
 
+#include <atomic>
 #include <iostream>
 #include <fstream>
 #include <ios>
@@ -679,7 +680,10 @@ PageLocs::build_page_locs(int16_t itemref_index)
   return done;
 }
 
-volatile bool relax = false;
+// Coordination flag between retrieve_asap() caller (holds unique_lock) and
+// the retriever thread (calls insert()).  When true, insert() bypasses the
+// mutex because the caller is blocked on a queue — see class-level doc.
+std::atomic<bool> relax{false};
 
 bool 
 PageLocs::retrieve_asap(int16_t itemref_index) 
@@ -730,29 +734,41 @@ PageLocs::start_new_document(int16_t count, int16_t itemref_index)
   check_for_format_changes(count, itemref_index, !load(epub.get_current_filename()));
 }
 
+/// Insert a page location.  Called by the retriever thread.
+/// Two paths: (1) relax==true → direct insert (caller holds unique_lock, is
+/// blocked in retrieve_asap), (2) normal → acquire unique_lock with 10ms
+/// timeout, retry up to 500 times (5s) to avoid indefinite spinning.
 bool 
 PageLocs::insert(PageId & id, PageInfo & info) 
 {
   if (!state_task.forgetting_retrieval()) {
-    while (true) {
+    constexpr int max_retries = 500; // 5 seconds at 10ms per retry
+    for (int attempt = 0; attempt < max_retries; attempt++) {
       if (relax) {
-        // The page_locs class is still in control of the mutex, but is waiting
-        // for the completion of an GET_ASAP item. As such, it is safe to insert
-        // a new page info in the list.
+        // The caller of retrieve_asap() holds a unique_lock on the mutex and
+        // is waiting for us to insert.  Direct insert is safe.
         LOG_D("Relaxed page info insert...");
         pages_map.insert(std::make_pair(id, info));
         items_set.insert(id.itemref_index);
-        break;
+        return true;
       }
       else {
-        if (mutex.try_lock_for(std::chrono::milliseconds(10))) {
+        // try_lock + manual delay: pthread_rwlock_timedwrlock is not
+        // implemented on ESP-IDF, so shared_timed_mutex won't work.
+        std::unique_lock<std::shared_mutex> lock(mutex, std::try_to_lock);
+        if (lock.owns_lock()) {
           pages_map.insert(std::make_pair(id, info));
           items_set.insert(id.itemref_index);
-          mutex.unlock();
-          break;
+          return true;
         }
+        #if EPUB_INKPLATE_BUILD
+          vTaskDelay(pdMS_TO_TICKS(10));
+        #else
+          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        #endif
       }
     }
+    LOG_E("insert: failed to acquire mutex after %d retries", max_retries);
     return true;
   }
   return false;
@@ -771,7 +787,9 @@ PageLocs::check_and_find(const PageId & page_id)
 const PageLocs::PageId * 
 PageLocs::get_next_page_id(const PageId & page_id, int16_t count)
 {
-  std::scoped_lock guard(mutex);
+  // unique_lock required: check_and_find() may call retrieve_asap() which
+  // allows the retriever thread to insert into pages_map via the relax flag.
+  std::unique_lock guard(mutex);
 
   PagesMap::iterator it = check_and_find(page_id);
   if (it == pages_map.end()) {
@@ -807,7 +825,9 @@ PageLocs::get_next_page_id(const PageId & page_id, int16_t count)
 const PageLocs::PageId * 
 PageLocs::get_prev_page_id(const PageId & page_id, int count) 
 {
-  std::scoped_lock guard(mutex);
+  // unique_lock required: check_and_find() and retrieve_asap() may trigger
+  // writes to pages_map via the relax flag.
+  std::unique_lock guard(mutex);
 
   PagesMap::iterator it = check_and_find(page_id);
   if (it == pages_map.end()) {
@@ -846,7 +866,8 @@ PageLocs::get_prev_page_id(const PageId & page_id, int count)
 const PageLocs::PageId * 
 PageLocs::get_page_id(const PageId & page_id) 
 {
-  std::scoped_lock guard(mutex);
+  // unique_lock required: check_and_find() may trigger writes via retrieve_asap().
+  std::unique_lock guard(mutex);
 
   PagesMap::iterator it     = check_and_find(PageId(page_id.itemref_index, 0));
   PagesMap::iterator result = pages_map.end();
@@ -861,15 +882,26 @@ PageLocs::get_page_id(const PageId & page_id)
   return (result == pages_map.end()) ? nullptr : &result->first ;
 }
 
+/// Assign sequential page numbers and build the O(1) reverse-index.
+/// Called once when all items have been processed.
 void
 PageLocs::computation_completed()
 {
-  std::scoped_lock guard(mutex);
+  std::unique_lock guard(mutex);
 
   if (!completed) {
+    // Assign sequential page numbers to visible pages (size >= 0)
     int16_t page_nbr = 0;
     for (auto & entry : pages_map) {
       if (entry.second.size >= 0) entry.second.page_number = page_nbr++;
+    }
+
+    // Build page_nbr_index: page_number → PageId for O(1) jump-to-page
+    page_nbr_index.resize(page_nbr);
+    for (const auto & entry : pages_map) {
+      if (entry.second.page_number >= 0 && entry.second.page_number < page_nbr) {
+        page_nbr_index[entry.second.page_number] = entry.first;
+      }
     }
 
     page_count = page_nbr;
@@ -987,6 +1019,17 @@ bool PageLocs::load(const std::string & epub_filename)
 
     page_count = page_nbr;
     ok = !file.fail();
+
+    // Build page_nbr_index for O(1) jump-to-page (same as computation_completed)
+    if (ok) {
+      page_nbr_index.resize(page_nbr);
+      for (const auto & entry : pages_map) {
+        if (entry.second.page_number >= 0 && entry.second.page_number < page_nbr) {
+          page_nbr_index[entry.second.page_number] = entry.first;
+        }
+      }
+    }
+
     break;
   }
 

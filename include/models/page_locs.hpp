@@ -7,8 +7,10 @@
 
 #include <thread>
 #include <mutex>
+#include <shared_mutex>
 #include <map>
 #include <set>
+#include <vector>
 
 #if EPUB_LINUX_BUILD
   #include <fcntl.h>
@@ -35,6 +37,27 @@
  * required to get fast retrieval of a page when required by the user. Page
  * locations are saved on disk once computed. Any change of font, font size,
  * screen orientation (portrait <-> landscape) will trigger a recomputation.
+ *
+ * Thread safety (shared_mutex):
+ * -----------------------------------
+ * Three threads interact with pages_map:
+ *   - Main thread:      reads via getters, may trigger retrieve_asap()
+ *   - Retriever thread: writes via insert()
+ *   - State thread:     coordinates work, does not touch pages_map directly
+ *
+ * Locking contracts:
+ *   unique_lock  — get_next/prev_page_id, get_page_id, get_page_info,
+ *                  insert, computation_completed, clear
+ *                  (These may call check_and_find → retrieve_asap, which
+ *                   enables the retriever thread to write via the relax flag.)
+ *   shared_lock  — get_page_nbr, get_page_id_from_page_nbr
+ *                  (Pure reads; only used after computation is completed.)
+ *
+ * The "relax" protocol:
+ *   When retrieve_asap() is called, the caller holds a unique_lock and sets
+ *   the atomic relax flag. The retriever thread sees relax==true and inserts
+ *   directly without acquiring the mutex. This is safe because the caller
+ *   is blocked on a queue and no other thread can write.
  */
 
 class PageLocs
@@ -85,13 +108,14 @@ class PageLocs
     typedef std::map<PageId, PageInfo, PageCompare> PagesMap;
     typedef std::set<int16_t> ItemsSet;
 
-    std::recursive_timed_mutex  mutex;
+    std::shared_mutex  mutex;  // See class-level doc for locking contracts
 
     std::thread state_thread;
     std::thread retriever_thread;
 
     PagesMap  pages_map;
     ItemsSet  items_set;
+    std::vector<PageId> page_nbr_index;  // page_number → PageId, O(1) lookup, built in computation_completed()
     int16_t   item_count;
 
     void show();
@@ -141,7 +165,8 @@ class PageLocs
     void            stop_document();
 
     inline const PageInfo* get_page_info(const PageId & page_id) {
-      std::scoped_lock   guard(mutex);
+      // unique_lock: check_and_find() may trigger writes via retrieve_asap().
+      std::unique_lock guard(mutex);
       PagesMap::iterator it = check_and_find(page_id);
       return it == pages_map.end() ? nullptr : &it->second;
     }
@@ -149,36 +174,30 @@ class PageLocs
     bool insert(PageId & id, PageInfo & info);
 
     inline void clear() { 
-      std::scoped_lock guard(mutex);
+      std::unique_lock guard(mutex);
       pages_map.clear(); 
       items_set.clear();
+      page_nbr_index.clear();
       completed = false; 
     }
 
     inline int16_t get_page_count() { return completed ? page_count : -1; }
 
+    /// shared_lock safe: pure read, no retrieve_asap() path. Only valid after completed.
     inline int16_t get_page_nbr(const PageId & id) {
-      std::scoped_lock guard(mutex);
+      std::shared_lock guard(mutex);
       if (!completed) return -1;
-      const PageInfo * info = get_page_info(id);
-      return info == nullptr ? -1 : info->page_number;
-    };
+      auto it = pages_map.find(id);
+      return (it == pages_map.end()) ? -1 : it->second.page_number;
+    }
 
-    /**
-     * @brief Get PageId from page number (0-based)
-     * @param page_nbr The page number (0-based)
-     * @return Pointer to PageId if found, nullptr otherwise
-     */
+    /// O(1) page number → PageId lookup via page_nbr_index vector.
+    /// shared_lock safe: pure read, only valid after completed.
     inline const PageId * get_page_id_from_page_nbr(int16_t page_nbr) {
-      std::scoped_lock guard(mutex);
-      if (!completed) return nullptr;
-      for (const auto & entry : pages_map) {
-        if (entry.second.page_number == page_nbr) {
-          return &entry.first;
-        }
-      }
-      return nullptr;
-    };
+      std::shared_lock guard(mutex);
+      if (!completed || page_nbr < 0 || page_nbr >= static_cast<int16_t>(page_nbr_index.size())) return nullptr;
+      return &page_nbr_index[page_nbr];
+    }
 };
 
 #if __PAGE_LOCS__
