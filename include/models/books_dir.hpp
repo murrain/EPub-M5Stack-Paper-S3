@@ -26,15 +26,20 @@
 class BooksDir
 {
   public:
-    static const uint16_t BOOKS_DIR_DB_VERSION =   6;
+    static const uint16_t BOOKS_DIR_DB_VERSION =   7;
 
     static const uint8_t  FILENAME_SIZE        = 128;
     static const uint8_t  TITLE_SIZE           = 128;
     static const uint8_t  AUTHOR_SIZE          =  64;
     static const uint16_t DESCRIPTION_SIZE     = 512;
 
-    static const uint8_t  MAX_COVER_WIDTH      =  70;
-    static const uint8_t  MAX_COVER_HEIGHT     =  90;
+    #if defined(BOARD_TYPE_PAPER_S3)
+      static const uint8_t  MAX_COVER_WIDTH    = 100;
+      static const uint8_t  MAX_COVER_HEIGHT   = 130;
+    #else
+      static const uint8_t  MAX_COVER_WIDTH    =  70;
+      static const uint8_t  MAX_COVER_HEIGHT   =  90;
+    #endif
 
     /**
      * @brief Single EBook Record
