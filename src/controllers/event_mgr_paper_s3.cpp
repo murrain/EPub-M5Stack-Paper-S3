@@ -8,6 +8,9 @@
 
 #include "controllers/event_mgr.hpp"
 #include "controllers/app_controller.hpp"
+#include "viewers/msg_viewer.hpp"
+#include "models/config.hpp"
+#include "inkplate_platform.hpp"
 #include "screen.hpp"
 
 #if EPUB_INKPLATE_BUILD
@@ -133,6 +136,15 @@ static void touch_task(void * param)
   uint16_t   current_y    = 0;
   TickType_t start_tick   = 0;
 
+  // Adaptive touch polling: 50ms active (responsive), 200ms idle (power saving).
+  // Transitions to slow after 10s of no touch activity.
+  constexpr uint32_t  fast_poll_ms          = 50;
+  constexpr uint32_t  slow_poll_ms          = 200;
+  constexpr TickType_t idle_threshold_ticks = pdMS_TO_TICKS(10000);
+
+  TickType_t last_activity = xTaskGetTickCount();
+  uint32_t   poll_ms       = fast_poll_ms;
+
   while (true) {
     uint16_t x = 0;
     uint16_t y = 0;
@@ -220,10 +232,24 @@ static void touch_task(void * param)
         if ((ev.kind != EventMgr::EventKind::NONE) && (input_event_queue != nullptr)) {
           xQueueSend(input_event_queue, &ev, 0);
         }
+
+        // Gesture just completed -- reset to fast polling.
+        last_activity = xTaskGetTickCount();
+        poll_ms       = fast_poll_ms;
       }
     }
 
-    vTaskDelay(pdMS_TO_TICKS(50));
+    // Adaptive polling: fast while touching, slow after idle timeout.
+    if (has_touch) {
+      last_activity = xTaskGetTickCount();
+      poll_ms       = fast_poll_ms;
+    } else if (!touch_active) {
+      if ((xTaskGetTickCount() - last_activity) > idle_threshold_ticks) {
+        poll_ms = slow_poll_ms;
+      }
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(poll_ms));
   }
 }
 
@@ -288,6 +314,32 @@ void EventMgr::loop()
       app_controller.input_event(event);
       return;
     }
+
+    // Sleep escalation: 15s idle → light sleep (configured minutes) → deep sleep.
+    // If light_sleep() returns false the user pressed the boot button — resume.
+    if (!stay_on) {
+      int8_t light_sleep_duration;
+      config.get(Config::Ident::TIMEOUT, &light_sleep_duration);
+
+      ESP_LOGI(TAG, "No input for 15 s — light sleep for %d minutes", light_sleep_duration);
+      vTaskDelay(pdMS_TO_TICKS(500));
+
+      if (inkplate_platform.light_sleep(light_sleep_duration, GPIO_NUM_0, 1)) {
+        app_controller.going_to_deep_sleep();
+
+        ESP_LOGI(TAG, "Light sleep timed out — entering deep sleep");
+        screen.force_full_update();
+        msg_viewer.show(
+          MsgViewer::MsgType::INFO,
+          false, true,
+          "Deep Sleep",
+          "Timeout period exceeded (%d minutes). "
+          "Press the boot button to restart.",
+          light_sleep_duration);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        inkplate_platform.deep_sleep(GPIO_NUM_0, 1);
+      }
+    }
   }
 #else
   while (true) { }
@@ -305,7 +357,7 @@ const EventMgr::Event & EventMgr::get_event()
     return event;
   }
 
-  if (!xQueueReceive(input_event_queue, &event, portMAX_DELAY)) {
+  if (!xQueueReceive(input_event_queue, &event, pdMS_TO_TICKS(15000))) {
     event.kind = EventKind::NONE;
   }
 #endif
