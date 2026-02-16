@@ -14,6 +14,7 @@ class BookParamController
 
     bool book_params_form_is_shown;
     bool jump_to_page_form_is_shown;
+    bool page_nav_is_shown;
     bool wait_for_key_after_wifi;
     bool delete_current_book;
 
@@ -21,6 +22,7 @@ class BookParamController
     BookParamController() :
       book_params_form_is_shown(false),
       jump_to_page_form_is_shown(false),
+             page_nav_is_shown(false),
         wait_for_key_after_wifi(false),
             delete_current_book(false) { };
 
@@ -31,6 +33,7 @@ class BookParamController
 
     inline void    set_book_params_form_is_shown() { book_params_form_is_shown    = true; }
     inline void set_jump_to_page_form_is_shown() { jump_to_page_form_is_shown = true; }
+    inline void           set_page_nav_is_shown() { page_nav_is_shown           = true; }
     inline void      set_wait_for_key_after_wifi() { wait_for_key_after_wifi      = true; }
     inline void          set_delete_current_book() { delete_current_book          = true; }
 };
