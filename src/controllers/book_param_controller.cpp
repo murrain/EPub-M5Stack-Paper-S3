@@ -18,6 +18,7 @@
 #include "viewers/form_viewer.hpp"
 #include "viewers/msg_viewer.hpp"
 #include "viewers/book_viewer.hpp"
+#include "viewers/page_nav_viewer.hpp"
 
 #if EPUB_INKPLATE_BUILD && !BOARD_TYPE_PAPER_S3
   #include "esp_system.h"
@@ -195,17 +196,6 @@ power_off()
   CommonActions::power_it_off();
 }
 
-// Jump to page functionality
-static uint16_t target_page_number = 1;
-
-static FormEntry jump_to_page_form_entry = {
-  .caption = "Page Number:",
-  .u = { .val = { .value = &target_page_number,
-                  .min   = 1,
-                  .max   = 1 } }, // max will be updated dynamically
-  .entry_type = FormEntryType::UINT16
-};
-
 static void
 jump_to_page()
 {
@@ -219,24 +209,13 @@ jump_to_page()
     return;
   }
 
-  // Get current page for default value
+  // Get current page for default value (1-based for the viewer)
   const PageLocs::PageId & current_page_id = book_controller.get_current_page_id();
   int16_t current_page = page_locs.get_page_nbr(current_page_id);
-  if (current_page >= 0) {
-    target_page_number = static_cast<uint16_t>(current_page + 1); // +1 because UI shows 1-based
-  }
-  else {
-    target_page_number = 1;
-  }
+  uint16_t start_page = (current_page >= 0) ? static_cast<uint16_t>(current_page + 1) : 1;
 
-  // Update form max value to actual page count
-  jump_to_page_form_entry.u.val.max = static_cast<uint16_t>(page_count);
-
-  // Show the form
-  form_viewer.show(&jump_to_page_form_entry, 1,
-                   "(Enter page number to jump to)");
-
-  book_param_controller.set_jump_to_page_form_is_shown();
+  page_nav_viewer.show(start_page, static_cast<uint16_t>(page_count), "Jump to Page");
+  book_param_controller.set_page_nav_is_shown();
 }
 
 // IMPORTANT!!
@@ -315,32 +294,31 @@ BookParamController::input_event(const EventMgr::Event & event)
       menu_viewer.clear_highlight();
     }
   }
-  else if (jump_to_page_form_is_shown) {
-    if (form_viewer.event(event)) {
-      jump_to_page_form_is_shown = false;
+  else if (page_nav_is_shown) {
+    if (!page_nav_viewer.event(event)) {
+      page_nav_is_shown = false;
 
-      // Convert page number (1-based) to 0-based for internal use
-      int16_t target_page_nbr = static_cast<int16_t>(target_page_number) - 1;
+      if (!page_nav_viewer.was_canceled()) {
+        // Convert from 1-based UI to 0-based internal page number
+        int16_t target_page_nbr = static_cast<int16_t>(page_nav_viewer.get_value()) - 1;
 
-      // Find the PageId that corresponds to this page number
-      const PageLocs::PageId * page_id_ptr = page_locs.get_page_id_from_page_nbr(target_page_nbr);
+        const PageLocs::PageId * target_page_id = page_locs.get_page_id_from_page_nbr(target_page_nbr);
 
-      if (page_id_ptr != nullptr) {
-        // Set the target page - the book controller will display it when we return
-        book_controller.set_current_page_id(*page_id_ptr);
-
-        // Return to book controller - it will call book_viewer.show_page() in enter()
-        app_controller.set_controller(AppController::Ctrl::BOOK);
+        if (target_page_id != nullptr) {
+          book_controller.set_current_page_id(*target_page_id);
+          app_controller.set_controller(AppController::Ctrl::BOOK);
+        }
+        else {
+          msg_viewer.show(MsgViewer::MsgType::INFO,
+                          false, false,
+                          "Jump to Page",
+                          "Page %d could not be found.",
+                          page_nav_viewer.get_value());
+        }
       }
       else {
-        msg_viewer.show(MsgViewer::MsgType::INFO,
-                        false, false,
-                        "Jump to Page",
-                        "Page %d could not be found. Please try again.",
-                        target_page_number);
+        menu_viewer.show(menu);
       }
-
-      menu_viewer.clear_highlight();
     }
   }
   else if (delete_current_book) {
