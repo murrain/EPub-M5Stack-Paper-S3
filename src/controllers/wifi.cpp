@@ -73,6 +73,7 @@ wifi_sta_event_handler(void        * arg,
       LOG_I("got ip:" IPSTR, IP2STR(&event->ip_info.ip));
       wifi.set_ip_address(event->ip_info.ip);
       s_retry_num = 0;
+      esp_wifi_set_ps(WIFI_PS_MIN_MODEM);  // Radio sleeps between DTIM beacons
       xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
       wifi_first_start = false;
     }
