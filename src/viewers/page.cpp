@@ -164,7 +164,7 @@ Page::put_str_at(const std::string & str, Pos pos, const Format & fmt)
           }
         #endif
 
-        display_list.push_front(entry);
+        display_list.push_back(entry);
       
         pos.x += glyph->advance;
       }
@@ -230,7 +230,7 @@ Page::put_str_at(const std::string & str, Pos pos, const Format & fmt)
           }
         #endif
 
-        display_list.push_front(entry);
+        display_list.push_back(entry);
       
         x += glyph->advance;
       }
@@ -266,7 +266,7 @@ Page::put_char_at(char ch, Pos pos, const Format & fmt)
       }
     #endif
 
-    display_list.push_front(entry);
+    display_list.push_back(entry);
   }  
 }
 
@@ -276,8 +276,6 @@ Page::paint(bool clear_screen, bool no_full, bool do_it)
   if (!do_it) if ((display_list.empty()) || (compute_mode != ComputeMode::DISPLAY)) return;
   
   if (clear_screen) screen.clear();
-
-  display_list.reverse();
 
   for (auto * entry : display_list) {
     if (entry->command == DisplayListCommand::GLYPH) {
@@ -491,23 +489,13 @@ Page::add_line(const Format & fmt, bool justifyable)
   // This is mainly required for the JUSTIFY alignment algo.
 
   while (!line_list.empty()) {
-    DisplayListEntry * entry = *(line_list.begin());
+    DisplayListEntry * entry = line_list.back();
     if ((entry->command == DisplayListCommand::GLYPH) && (entry->kind.glyph_entry.is_space)) {
       display_list_entry_pool.deleteElement(entry);
-      line_list.pop_front(); 
+      line_list.pop_back(); 
     }
     else break;
-    // if (entry->pos.y > 0) {
-    //   if (entry->command == DisplayListCommand::IMAGE) {
-    //     if (entry->kind.image_entry.image.bitmap != nullptr) {
-    //       delete [] entry->kind.image_entry.image.bitmap;
-    //     }
-    //   }
-    // }
-    // else break;
   }
-
-  line_list.reverse();
   
   if (!line_list.empty() && (compute_mode == ComputeMode::DISPLAY)) {
   
@@ -573,7 +561,7 @@ Page::add_line(const Format & fmt, bool justifyable)
       }
     #endif
 
-    display_list.push_front(entry);
+    display_list.push_back(entry);
   };
   
   line_width = line_height = glyphs_height = 0;
@@ -606,7 +594,7 @@ Page::add_glyph_to_line(Font::Glyph * glyph, const Format & fmt, Font & font, bo
 
   line_width += (glyph->advance);
 
-  line_list.push_front(entry);
+  line_list.push_back(entry);
 }
 
 void 
@@ -656,7 +644,7 @@ Page::add_image_to_line(Image & image, int16_t advance, const Format & fmt)
   //   entry->kind.image_entry.advance
   // );
 
-  line_list.push_front(entry);
+  line_list.push_back(entry);
 }
 
 #define NEXT_LINE_REQUIRED_SPACE (pos.y + (fmt.line_height_factor * font->get_line_height(fmt.font_size)) - font->get_descender_height(fmt.font_size))
@@ -712,7 +700,7 @@ Page::add_word(const char * word,  const Format & fmt)
       entry->kind.glyph_entry.is_space = false;
       entry->pos.y                     = fmt.vertical_align;
 
-      the_list->push_front(entry);
+      the_list->push_back(entry);
     }
   }
 
@@ -746,15 +734,12 @@ Page::add_word(const char * word,  const Format & fmt)
     }
   }
 
-  line_list.splice_after(line_list.before_begin(), *the_list);
+  line_list.insert(line_list.end(), the_list->begin(), the_list->end());
 
   if (glyphs_height < height) glyphs_height = height;
   if (line_height_factor < fmt.line_height_factor) line_height_factor = fmt.line_height_factor;
   line_width += width;
 
-  for (auto * entry : *the_list) {
-    display_list_entry_pool.deleteElement(entry);
-  }
   the_list->clear();
   delete the_list;
 
@@ -1028,7 +1013,7 @@ Page::put_image(Image::ImageData & image,
     }
   #endif
 
-  display_list.push_front(entry);
+  display_list.push_back(entry);
 }
 
 void 
@@ -1050,7 +1035,7 @@ Page::put_highlight(Dim dim, Pos pos)
     }
   #endif
 
-  display_list.push_front(entry);
+  display_list.push_back(entry);
 }
 
 void 
@@ -1072,7 +1057,7 @@ Page::clear_highlight(Dim dim, Pos pos)
     }
   #endif
 
-  display_list.push_front(entry);
+  display_list.push_back(entry);
 }
 
 void 
@@ -1094,7 +1079,7 @@ Page::put_rounded(Dim dim, Pos pos)
     }
   #endif
 
-  display_list.push_front(entry);
+  display_list.push_back(entry);
 }
 
 void 
@@ -1116,7 +1101,7 @@ Page::clear_rounded(Dim dim, Pos pos)
     }
   #endif
 
-  display_list.push_front(entry);
+  display_list.push_back(entry);
 }
 
 void 
@@ -1138,7 +1123,7 @@ Page::clear_region(Dim dim, Pos pos)
     }
   #endif
 
-  display_list.push_front(entry);
+  display_list.push_back(entry);
 }
 
 
@@ -1161,7 +1146,7 @@ Page::set_region(Dim dim, Pos pos)
     }
   #endif
 
-  display_list.push_front(entry);
+  display_list.push_back(entry);
 }
 
 bool

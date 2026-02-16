@@ -6,7 +6,7 @@
 #include "global.hpp"
 
 #include <string>
-#include <forward_list>
+#include <vector>
 
 #include "models/image.hpp"
 #include "models/fonts.hpp"
@@ -91,7 +91,8 @@ class Page
       DisplayListCommand command;      ///< Command
     };
 
-    typedef std::forward_list<DisplayListEntry *> DisplayList;
+    // vector (was forward_list): push_back in render order, no reverse() needed.
+    typedef std::vector<DisplayListEntry *> DisplayList;
 
     /**
      * @brief Book Compute Mode
