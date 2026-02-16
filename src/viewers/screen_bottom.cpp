@@ -54,11 +54,14 @@ ScreenBottom::show(int16_t page_nbr, int16_t page_count)
                     Pos(0, Screen::get_height() - h));
 
   if ((page_nbr != -1) && (page_count != -1)) {
-    ostr << page_nbr + 1 << " / " << page_count;
+    // Calculate percentage
+    int percentage = (page_count > 0) ? ((page_nbr + 1) * 100 / page_count) : 0;
 
-    page.put_str_at(ostr.str(), 
-                    Pos(Page::HORIZONTAL_CENTER, 
-                        Screen::get_height() + font->get_descender_height(FONT_SIZE) - 2), 
+    ostr << page_nbr + 1 << " / " << page_count << "  (" << percentage << "%)";
+
+    page.put_str_at(ostr.str(),
+                    Pos(Page::HORIZONTAL_CENTER,
+                        Screen::get_height() + font->get_descender_height(FONT_SIZE) - 2),
                     fmt);
   }
 
