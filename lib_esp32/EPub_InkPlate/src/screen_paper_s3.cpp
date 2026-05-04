@@ -94,25 +94,23 @@ void Screen::update(UpdateMode mode)
       return;
 
     case UpdateMode::FAST: {
+      // Pre-check the budget so a single update is emitted per call —
+      // either the fast waveform or a GC16 cleanup, never both.
 #ifdef EPD_FAST_PAGE_TURNS_FALLBACK
-      // Fallback: if MODE_DU artifacts are unshippable, route FAST to GL16.
-      run_update(MODE_GL16, s_temperature, "GL16(fast-fallback)");
-      s_partial_count -= FAST_BUDGET_COST;
-      if (s_partial_count < 0) {
-        run_update(MODE_GC16, s_temperature, "GC16(fast-cleanup)");
-        s_partial_count = PARTIAL_COUNT_ALLOWED;
-      }
+      // Fallback: route FAST to GL16 instead of MODE_DU.
+      const EpdDrawMode  fast_mode  = MODE_GL16;
+      const char * const fast_label = "GL16(fast-fallback)";
 #else
-      // Would the FAST update overrun the budget? Force a GC16 cleanup
-      // instead so ghosting does not accumulate beyond the budget window.
+      const EpdDrawMode  fast_mode  = MODE_DU;
+      const char * const fast_label = "DU(fast)";
+#endif
       if (s_partial_count - FAST_BUDGET_COST < 0) {
         run_update(MODE_GC16, s_temperature, "GC16(fast-cleanup)");
         s_partial_count = PARTIAL_COUNT_ALLOWED;
       } else {
-        run_update(MODE_DU, s_temperature, "DU(fast)");
+        run_update(fast_mode, s_temperature, fast_label);
         s_partial_count -= FAST_BUDGET_COST;
       }
-#endif
       return;
     }
 
