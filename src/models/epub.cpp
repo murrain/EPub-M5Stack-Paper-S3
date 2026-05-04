@@ -946,6 +946,17 @@ EPub::clear_item_data(ItemInfo & item)
   for (auto * css : item.css_cache) delete css;
   item.css_cache.clear();
 
+  // Free the merged item.css too. retrieve_css already frees this before
+  // assigning a new one, and build_page_locs frees it at the end of a
+  // build, so the build/render flow won't leak. But close_file and the
+  // format-params reset path call clear_item_data on a current_item_info
+  // whose css may still hold the last item's merged stylesheet — that
+  // path leaked one CSS per book-close-without-reopen.
+  if (item.css != nullptr) {
+    delete item.css;
+    item.css = nullptr;
+  }
+
   item.itemref_index = -1;
 }
 
