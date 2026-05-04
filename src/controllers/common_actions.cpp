@@ -69,7 +69,12 @@ CommonActions::power_it_off()
     // sleep_screen_viewer triggers its own full GC16 refresh so the
     // panel is in a clean state for long retention.
     SleepScreenViewer::show();
-    ESP::delay(200);
+    // Give the GC16 waveform time to fully clock out (~600 ms) before
+    // we cut the e-paper rail. epdiy's high-level update is synchronous
+    // for the framebuffer commit but the panel-side waveform continues;
+    // a too-short delay here can leave a half-rendered sleep screen
+    // visible for the entire deep-sleep duration.
+    ESP::delay(800);
     inkplate_platform.deep_sleep(INT_PIN, LEVEL);
   #else
     extern void exit_app();

@@ -54,6 +54,10 @@ bool Battery::setup()
   err = adc_oneshot_config_channel(adc_handle, BAT_ADC_CHANNEL, &chan_cfg);
   if (err != ESP_OK) {
     LOG_E("Battery: adc_oneshot_config_channel failed (%s)", esp_err_to_name(err));
+    // Release the ADC unit handle we already own so a future retry of
+    // setup() doesn't fail with INVALID_STATE on the unit re-claim.
+    adc_oneshot_del_unit(adc_handle);
+    adc_handle = nullptr;
     return false;
   }
 

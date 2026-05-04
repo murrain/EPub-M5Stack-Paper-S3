@@ -108,6 +108,14 @@ bool InkPlatePlatform::light_sleep(uint32_t minutes_to_sleep, gpio_num_t /*gpio_
   esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
   gpio_wakeup_disable(GT911_INT_GPIO);
 
+  // Disarm both wake sources so they don't carry over to the next
+  // light_sleep call. Without this the timer wakeup stays armed,
+  // and the residual time from the prior arm can fire spuriously
+  // on the next sleep entry — the user would see the device escalate
+  // to deep_sleep without actually being idle.
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
+
   LOG_I("Paper S3 woke from light sleep (cause=%d)", (int)cause);
   // Match the existing caller semantics in event_mgr / touch_event_mgr:
   //   true  → timer expired (caller escalates to deep_sleep)
