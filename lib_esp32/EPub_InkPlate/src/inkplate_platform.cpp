@@ -109,9 +109,10 @@ bool InkPlatePlatform::light_sleep(uint32_t minutes_to_sleep, gpio_num_t /*gpio_
   gpio_wakeup_disable(GT911_INT_GPIO);
 
   LOG_I("Paper S3 woke from light sleep (cause=%d)", (int)cause);
-  // Return true when the wake came from a user touch (caller treats
-  // that as "user wants to interact"); false when it was the timer.
-  return cause == ESP_SLEEP_WAKEUP_GPIO;
+  // Match the existing caller semantics in event_mgr / touch_event_mgr:
+  //   true  → timer expired (caller escalates to deep_sleep)
+  //   false → GPIO touch wake (caller resumes normal operation)
+  return cause == ESP_SLEEP_WAKEUP_TIMER;
 }
 
 void InkPlatePlatform::deep_sleep(gpio_num_t /*gpio_num*/, int /*level*/)

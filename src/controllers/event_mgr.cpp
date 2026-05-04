@@ -22,6 +22,7 @@
   #include "wire.hpp"
   #include "inkplate_platform.hpp"
   #include "viewers/msg_viewer.hpp"
+  #include "viewers/sleep_screen_viewer.hpp"
   #include "esp.hpp"
 
   #if EXTENDED_CASE
@@ -308,16 +309,20 @@
           if (inkplate_platform.light_sleep(light_sleep_duration, INT_PIN, 1)) {
 
             app_controller.going_to_deep_sleep();
-            
+
             LOG_D("Timed out on Light Sleep. Going now to Deep Sleep");
-            screen.force_full_update();
-            msg_viewer.show(
-              MsgViewer::MsgType::INFO, 
-              false, true, 
-              "Deep Sleep", 
-              "Timeout period exceeded (%d minutes). The device is now "
-              "entering into Deep Sleep mode. Please press a key to restart.",
-              light_sleep_duration);
+            #if defined(BOARD_TYPE_PAPER_S3)
+              SleepScreenViewer::show();
+            #else
+              screen.force_full_update();
+              msg_viewer.show(
+                MsgViewer::MsgType::INFO,
+                false, true,
+                "Deep Sleep",
+                "Timeout period exceeded (%d minutes). The device is now "
+                "entering into Deep Sleep mode. Please press a key to restart.",
+                light_sleep_duration);
+            #endif
             ESP::delay(1000);
             inkplate_platform.deep_sleep(INT_PIN, 1);
           }

@@ -11,6 +11,7 @@
 #include "controllers/event_mgr.hpp"
 #include "viewers/msg_viewer.hpp"
 #include "viewers/menu_viewer.hpp"
+#include "viewers/sleep_screen_viewer.hpp"
 #include "models/books_dir.hpp"
 
 #if EPUB_INKPLATE_BUILD
@@ -63,10 +64,12 @@ CommonActions::power_it_off()
 
   app_controller.going_to_deep_sleep();
   #if EPUB_INKPLATE_BUILD
-    screen.force_full_update();
-    msg_viewer.show(MsgViewer::MsgType::INFO, false, true, "Power OFF",
-      "Entering Deep Sleep mode. " MSG);
-    ESP::delay(1000);
+    // Render the sleep screen as the LAST frame the panel sees. e-ink
+    // retains it without power for the duration of deep sleep. The
+    // sleep_screen_viewer triggers its own full GC16 refresh so the
+    // panel is in a clean state for long retention.
+    SleepScreenViewer::show();
+    ESP::delay(200);
     inkplate_platform.deep_sleep(INT_PIN, LEVEL);
   #else
     extern void exit_app();

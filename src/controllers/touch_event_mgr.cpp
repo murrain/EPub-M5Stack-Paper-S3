@@ -34,6 +34,7 @@ const char * EventMgr::event_str[8] = { "NONE",        "TAP",           "HOLD", 
   #include "inkplate_platform.hpp"
   #include "esp.hpp"
   #include "viewers/msg_viewer.hpp"
+  #include "viewers/sleep_screen_viewer.hpp"
 
   #include "touch_screen.hpp"
   #include "logging.hpp"
@@ -703,17 +704,21 @@ const char * EventMgr::event_str[8] = { "NONE",        "TAP",           "HOLD", 
           if (inkplate_platform.light_sleep(light_sleep_duration, TouchScreen::INTERRUPT_PIN, 0)) {
 
             app_controller.going_to_deep_sleep();
-            
+
             LOG_D("Timed out on Light Sleep. Going now to Deep Sleep");
-            
-            screen.force_full_update();
-            msg_viewer.show(
-              MsgViewer::MsgType::INFO, 
-              false, true, 
-              "Deep Sleep", 
-              "Timeout period exceeded (%d minutes). The device is now "
-              "entering into Deep Sleep mode. Please press the WakeUp Button to restart.",
-              light_sleep_duration);
+
+            #if defined(BOARD_TYPE_PAPER_S3)
+              SleepScreenViewer::show();
+            #else
+              screen.force_full_update();
+              msg_viewer.show(
+                MsgViewer::MsgType::INFO,
+                false, true,
+                "Deep Sleep",
+                "Timeout period exceeded (%d minutes). The device is now "
+                "entering into Deep Sleep mode. Please press the WakeUp Button to restart.",
+                light_sleep_duration);
+            #endif
             ESP::delay(1000);
 
             inkplate_platform.deep_sleep(TouchScreen::INTERRUPT_PIN, 0);
