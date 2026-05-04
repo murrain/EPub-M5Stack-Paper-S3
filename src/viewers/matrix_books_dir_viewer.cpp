@@ -398,7 +398,7 @@ MatrixBooksDirViewer::clear_highlight()
     page.end_paragraph(fmt);
   #endif
 
-  #if EPUB_INKPLATE_BUILD && !BOARD_TYPE_PAPER_S3
+  #if EPUB_INKPLATE_BUILD
     BatteryViewer::show();
   #endif
 

@@ -19,6 +19,9 @@
   #include "models/nvs_mgr.hpp"
   #include "screen.hpp"
   #include "inkplate_platform.hpp"
+  #if defined(BOARD_TYPE_PAPER_S3)
+    #include "battery_paper_s3.hpp"
+  #endif
   #include "helpers/unzip.hpp"
   #include "viewers/msg_viewer.hpp"
   #include "pugixml.hpp"
@@ -66,6 +69,12 @@
     #else
       bool inkplate_err = !inkplate_platform.setup(true);
       if (inkplate_err) LOG_E("InkPlate6Ctrl Error.");
+
+      #if defined(BOARD_TYPE_PAPER_S3)
+        if (!battery.setup()) {
+          LOG_W("Battery monitor setup failed; level reads will return 0.");
+        }
+      #endif
 
       bool config_err = !config.read();
 
