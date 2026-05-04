@@ -370,17 +370,22 @@ class StateTask
             LOG_D("-> ASAP_READY <-");
             waiting_for_itemref = -1;
             if (itemref_count != -1) {
-              int16_t itemref              = state_queue_data.itemref_index;
+              int16_t itemref = state_queue_data.itemref_index;
+              // Correct the negative-encoded failure marker BEFORE sending
+              // to mgr_queue. The original code sent the raw (possibly
+              // negative) itemref, so any future receiver that inspects
+              // the index would see an out-of-range value. Match the
+              // ITEM_READY handler's correct-then-use pattern.
+              if (itemref < 0) {
+                itemref = -(itemref + 1);
+                LOG_E("Unable to retrieve pages location for item %d", itemref);
+              }
               mgr_queue_data = {
                 .req           = MgrReq::ASAP_READY,
                 .itemref_index = itemref
               };
               QUEUE_SEND(mgr_queue, mgr_queue_data, 0);
               LOG_D("Sent ASAP_READY to Mgr");
-              if (itemref < 0) {
-                itemref = -(itemref + 1);
-                LOG_E("Unable to retrieve pages location for item %d", itemref);
-              }
               bitset[itemref >> 3] |= (1 << (itemref & 7));
               if (stopping) {
                 stopping = false;
