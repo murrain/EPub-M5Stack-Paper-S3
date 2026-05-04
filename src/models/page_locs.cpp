@@ -730,6 +730,9 @@ PageLocs::build_page_locs(int16_t itemref_index)
     //dom->show();
     delete dom;
     dom = nullptr;
+
+    delete interp;
+    interp = nullptr;
   }
 
   //page_out.set_compute_mode(Page::ComputeMode::DISPLAY);
