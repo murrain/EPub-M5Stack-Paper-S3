@@ -12,6 +12,7 @@
 #include "models/fonts.hpp"
 #include "models/css.hpp"
 #include "memory_pool.hpp"
+#include "screen.hpp"
 
 #include "pugixml.hpp"
 
@@ -128,6 +129,14 @@ class Page
     void  add_glyph_to_line(Font::Glyph * glyph, const Format & fmt, Font & font, bool is_space);
     void  add_image_to_line(Image & image, int16_t advance, const Format & fmt);
     int32_t      to_unicode(const char *str, CSS::TextTransform transform, bool first, const char **str2) const;
+
+    /**
+     * @brief Shared implementation for the paint() overloads.
+     *
+     * Walks the display list and pushes it to the screen, then calls
+     * Screen::update with the requested waveform mode.
+     */
+    void paint_impl(Screen::UpdateMode mode, bool clear_screen, bool do_it);
 
   public:
 
@@ -265,15 +274,27 @@ class Page
 
     /**
      * @brief Paint the display list to the screen.
-     * 
-     * The screen is first erased and the painting process is done using 
+     *
+     * The screen is first erased and the painting process is done using
      * the content of the display list.
-     * 
+     *
      * @param clear_screen Screen contain is erased before painting.
      * @param no_full      Bypass partial update count control. Use with great caution!
      * @param do_it        Do the painting irrelevant of the compute mode
      */
     void paint(bool clear_screen = true, bool no_full = false, bool do_it = false);
+
+    /**
+     * @brief Paint the display list with an explicit waveform mode.
+     *
+     * Same behavior as the bool-form paint(), but lets the caller pick the
+     * exact Screen::UpdateMode (e.g. FAST for fluid text page turns).
+     *
+     * @param mode         Waveform mode for the screen update.
+     * @param clear_screen Screen contents are erased before painting.
+     * @param do_it        Do the painting irrelevant of the compute mode.
+     */
+    void paint(Screen::UpdateMode mode, bool clear_screen = true, bool do_it = false);
 
     void show_fmt(const Format & fmt, const char * spaces) const {
       #if DEBUGGING

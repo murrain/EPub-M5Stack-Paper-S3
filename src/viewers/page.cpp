@@ -273,8 +273,21 @@ Page::put_char_at(char ch, Pos pos, const Format & fmt)
 void
 Page::paint(bool clear_screen, bool no_full, bool do_it)
 {
+  paint_impl(no_full ? Screen::UpdateMode::FORCE_PARTIAL : Screen::UpdateMode::BUDGETED,
+             clear_screen, do_it);
+}
+
+void
+Page::paint(Screen::UpdateMode mode, bool clear_screen, bool do_it)
+{
+  paint_impl(mode, clear_screen, do_it);
+}
+
+void
+Page::paint_impl(Screen::UpdateMode mode, bool clear_screen, bool do_it)
+{
   if (!do_it) if ((display_list.empty()) || (compute_mode != ComputeMode::DISPLAY)) return;
-  
+
   if (clear_screen) screen.clear();
 
   display_list.reverse();
@@ -294,49 +307,49 @@ Page::paint(bool clear_screen, bool no_full, bool do_it)
     }
     else if (entry->command == DisplayListCommand::IMAGE) {
       screen.draw_bitmap(
-        entry->kind.image_entry.image.bitmap, 
-        entry->kind.image_entry.image.dim,  
+        entry->kind.image_entry.image.bitmap,
+        entry->kind.image_entry.image.dim,
         entry->pos);
     }
     else if (entry->command == DisplayListCommand::HIGHLIGHT) {
       screen.draw_rectangle(
-        entry->kind.region_entry.dim, 
-        entry->pos, 
+        entry->kind.region_entry.dim,
+        entry->pos,
         Screen::BLACK_COLOR);
     }
     else if (entry->command == DisplayListCommand::CLEAR_HIGHLIGHT) {
       screen.draw_rectangle(
-        entry->kind.region_entry.dim, 
+        entry->kind.region_entry.dim,
         entry->pos,
         Screen::WHITE_COLOR);
     }
     else if (entry->command == DisplayListCommand::ROUNDED) {
       screen.draw_round_rectangle(
-        entry->kind.region_entry.dim, 
-        entry->pos, 
+        entry->kind.region_entry.dim,
+        entry->pos,
         Screen::BLACK_COLOR);
     }
     else if (entry->command == DisplayListCommand::CLEAR_ROUNDED) {
       screen.draw_round_rectangle(
-        entry->kind.region_entry.dim, 
+        entry->kind.region_entry.dim,
         entry->pos,
         Screen::WHITE_COLOR);
     }
     else if (entry->command == DisplayListCommand::CLEAR_REGION) {
       screen.colorize_region(
-        entry->kind.region_entry.dim, 
+        entry->kind.region_entry.dim,
         entry->pos,
         Screen::WHITE_COLOR);
     }
     else if (entry->command == DisplayListCommand::SET_REGION) {
       screen.colorize_region(
-        entry->kind.region_entry.dim, 
+        entry->kind.region_entry.dim,
         entry->pos,
         Screen::BLACK_COLOR);
     }
   }
 
-  screen.update(no_full);
+  screen.update(mode);
 }
 
 void
