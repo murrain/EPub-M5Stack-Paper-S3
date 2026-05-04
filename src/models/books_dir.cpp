@@ -334,6 +334,9 @@ BooksDir::refresh(char * book_filename, int16_t & book_index, bool force_init)
   struct dirent * de       = nullptr;
   DIR           * dp       = nullptr;
   bool            first    = true;
+  // Hoisted out of the is_some_record_deleted() block so the
+  // error_clear path can free it on any goto-out from that block.
+  SimpleDB *      new_db   = nullptr;
 
   SortedIndex     temp_index;
 
@@ -408,7 +411,7 @@ BooksDir::refresh(char * book_filename, int16_t & book_index, bool force_init)
     // Some record have been deleted. We have to recreate a database
     // with the cleaned records
 
-    SimpleDB * new_db = new SimpleDB;
+    new_db = new SimpleDB;
     sorted_index.clear();
 
     if (new_db->create(NEW_DIR_FILE)) {
@@ -464,6 +467,7 @@ BooksDir::refresh(char * book_filename, int16_t & book_index, bool force_init)
       new_db->close();
 
       delete new_db;
+      new_db = nullptr;
       if (remove(BOOKS_DIR_FILE)) {
         LOG_E("Unable to remove directory DB file."); 
         goto error_clear;
@@ -653,6 +657,11 @@ BooksDir::refresh(char * book_filename, int16_t & book_index, bool force_init)
   return true;
 
 error_clear:
+  if (new_db) {
+    new_db->close();
+    delete new_db;
+    new_db = nullptr;
+  }
   temp_index.clear();
   if (dp) closedir(dp);
   if (the_book) free(the_book);
