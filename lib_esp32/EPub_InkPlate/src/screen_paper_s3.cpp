@@ -46,11 +46,8 @@ void Screen::clear()
   epd_hl_set_all_white(&s_hl);
 }
 
-// Forward declaration — bool shim defers to the typed entry point below.
-void Screen::update(bool no_full)
-{
-  update(no_full ? UpdateMode::FORCE_PARTIAL : UpdateMode::BUDGETED);
-}
+// The bool shim Screen::update(bool no_full) is defined inline in screen.hpp.
+// Only the out-of-line typed entry point lives in this translation unit.
 
 // Cost charged against the partial budget per FAST update. MODE_DU leaves
 // more residual ghosting than GL16, so the next forced GC16 cleanup arrives
