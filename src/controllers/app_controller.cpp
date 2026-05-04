@@ -11,6 +11,7 @@
 #include "controllers/option_controller.hpp"
 #include "controllers/toc_controller.hpp"
 #include "controllers/event_mgr.hpp"
+#include "models/page_locs.hpp"
 
 #if INKPLATE_6PLUS
   #include "controllers/back_lit.hpp"
@@ -133,6 +134,14 @@ AppController::going_to_deep_sleep()
     back_lit.turn_off();
     touch_screen.shutdown();
   #endif
+
+  // Stop the page-locations retriever before any controller writes its
+  // own state to flash. Without this, the RetrieverTask can be mid-build
+  // and emit a save() of the .locs file (page_locs.cpp computation_completed
+  // path) concurrently with book_controller.leave's nvs/locs persistence,
+  // corrupting either file. stop_document is safe to call when already
+  // idle (the STOP handler short-circuits and sends STOPPED immediately).
+  page_locs.stop_document();
 
   switch (current_ctrl) {
     case Ctrl::DIR:     books_dir_controller.leave(true); break;
