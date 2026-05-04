@@ -9,6 +9,11 @@ extern "C" {
   #include <epd_display.h>
 }
 
+#ifdef EPD_LOG_UPDATE_TIMING
+  #include "esp_timer.h"
+  #include "esp_log.h"
+#endif
+
 // Board definition implemented in PaperS3Support/EpdiyPaperS3Board.c
 extern "C" {
   extern const EpdBoardDefinition paper_s3_board;
@@ -41,29 +46,89 @@ void Screen::clear()
   epd_hl_set_all_white(&s_hl);
 }
 
+// Forward declaration — bool shim defers to the typed entry point below.
 void Screen::update(bool no_full)
+{
+  update(no_full ? UpdateMode::FORCE_PARTIAL : UpdateMode::BUDGETED);
+}
+
+// Cost charged against the partial budget per FAST update. MODE_DU leaves
+// more residual ghosting than GL16, so the next forced GC16 cleanup arrives
+// sooner. Tuned conservatively at 2 — adjust if ghosting accumulates faster
+// or slower in the field.
+static constexpr int16_t FAST_BUDGET_COST = 2;
+
+static inline void run_update(EpdDrawMode mode, int temperature, const char * mode_name)
+{
+  (void)mode_name;
+#ifdef EPD_LOG_UPDATE_TIMING
+  int64_t t0 = esp_timer_get_time();
+#endif
+  epd_hl_update_screen(&s_hl, mode, temperature);
+#ifdef EPD_LOG_UPDATE_TIMING
+  int64_t dt_us = esp_timer_get_time() - t0;
+  ESP_LOGI("screen", "update %s: %lld us", mode_name, (long long)dt_us);
+#endif
+}
+
+void Screen::update(UpdateMode mode)
 {
   if (!s_epd_initialized) return;
 
+  // s_force_full always wins, regardless of caller's requested mode. This
+  // preserves the historical short-circuit semantics: a pending forced
+  // full update cannot be skipped by an explicit FORCE_PARTIAL/FAST.
   if (s_force_full) {
-    epd_hl_update_screen(&s_hl, MODE_GC16, s_temperature);
+    run_update(MODE_GC16, s_temperature, "GC16(forced)");
     s_force_full = false;
     s_partial_count = PARTIAL_COUNT_ALLOWED;
     return;
   }
 
-  if (no_full) {
-    epd_hl_update_screen(&s_hl, MODE_GL16, s_temperature);
-    s_partial_count = 0;
-    return;
-  }
+  switch (mode) {
+    case UpdateMode::FULL:
+      run_update(MODE_GC16, s_temperature, "GC16(full)");
+      s_partial_count = PARTIAL_COUNT_ALLOWED;
+      return;
 
-  if (s_partial_count <= 0) {
-    epd_hl_update_screen(&s_hl, MODE_GC16, s_temperature);
-    s_partial_count = PARTIAL_COUNT_ALLOWED;
-  } else {
-    epd_hl_update_screen(&s_hl, MODE_GL16, s_temperature);
-    s_partial_count--;
+    case UpdateMode::FORCE_PARTIAL:
+      run_update(MODE_GL16, s_temperature, "GL16(partial)");
+      s_partial_count = 0;
+      return;
+
+    case UpdateMode::FAST: {
+#ifdef EPD_FAST_PAGE_TURNS_FALLBACK
+      // Fallback: if MODE_DU artifacts are unshippable, route FAST to GL16.
+      run_update(MODE_GL16, s_temperature, "GL16(fast-fallback)");
+      s_partial_count -= FAST_BUDGET_COST;
+      if (s_partial_count < 0) {
+        run_update(MODE_GC16, s_temperature, "GC16(fast-cleanup)");
+        s_partial_count = PARTIAL_COUNT_ALLOWED;
+      }
+#else
+      // Would the FAST update overrun the budget? Force a GC16 cleanup
+      // instead so ghosting does not accumulate beyond the budget window.
+      if (s_partial_count - FAST_BUDGET_COST < 0) {
+        run_update(MODE_GC16, s_temperature, "GC16(fast-cleanup)");
+        s_partial_count = PARTIAL_COUNT_ALLOWED;
+      } else {
+        run_update(MODE_DU, s_temperature, "DU(fast)");
+        s_partial_count -= FAST_BUDGET_COST;
+      }
+#endif
+      return;
+    }
+
+    case UpdateMode::BUDGETED:
+    default:
+      if (s_partial_count <= 0) {
+        run_update(MODE_GC16, s_temperature, "GC16(budgeted)");
+        s_partial_count = PARTIAL_COUNT_ALLOWED;
+      } else {
+        run_update(MODE_GL16, s_temperature, "GL16(budgeted)");
+        s_partial_count--;
+      }
+      return;
   }
 }
 
