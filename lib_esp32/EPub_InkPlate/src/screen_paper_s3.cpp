@@ -201,8 +201,15 @@ static inline uint8_t gray8_to_nibble(uint8_t v)
 
 static inline uint8_t alpha8_to_nibble(uint8_t a)
 {
-  // Alpha 0 (transparent) .. 255 (opaque) => 15..0 (white..black)
-  return (uint8_t)(15 - (a >> 4));
+  // Alpha 0 (transparent) .. 255 (opaque) => 15..0 (white..black).
+  // 2x boost so antialiased glyph edges land in the framebuffer's
+  // "black" half (nibble <= 7) and survive 2-level (MODE_DU) waveform
+  // thresholding without losing visual weight. With a linear mapping,
+  // most AA pixels (alpha < 128) thresholded to white under DU,
+  // making text appear thin under the FAST update mode.
+  uint16_t boosted = (uint16_t)a << 1;
+  if (boosted > 255) boosted = 255;
+  return (uint8_t)(15 - (boosted >> 4));
 }
 
 static inline uint8_t gray3_to_nibble(uint8_t v)
