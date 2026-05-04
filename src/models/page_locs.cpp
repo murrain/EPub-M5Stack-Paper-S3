@@ -252,6 +252,11 @@ class StateTask
               itemref_count    = -1;
               retriever_iddle  = true;
               forget_retrieval = true;
+              // Reset stopping defensively: a prior STOP that left
+              // stopping=true would otherwise cause the next
+              // ITEM_READY/ASAP_READY (if any racy in-flight reply
+              // arrives) to fire a spurious STOPPED into mgr_queue.
+              stopping         = false;
               break;
             }
             bitset_size   = (uint16_t)((itemref_count + 7) >> 3);
