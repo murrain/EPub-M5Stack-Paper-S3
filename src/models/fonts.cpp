@@ -269,6 +269,18 @@ Fonts::clear_everything()
 void
 Fonts::adjust_default_font(uint8_t font_index)
 {
+  // Guard against a corrupted .pars / config persisting an out-of-range
+  // font index. The font_*_fname arrays are sized 8 (the hard cap in the
+  // font-loader at line 166) and only the first font_count slots are
+  // populated. Without this clamp, an out-of-range index would read
+  // arbitrary memory and replace() would attempt to load a garbage path.
+  if (font_index >= font_count) {
+    LOG_E("adjust_default_font: index %u out of range (count=%u); using 0",
+          (unsigned)font_index, (unsigned)font_count);
+    font_index = 0;
+  }
+  if (font_count == 0) return;
+
   if (font_cache.at(3).name.compare(font_names[font_index]) != 0) {
     std::string normal      = std::string(FONTS_FOLDER "/").append(    regular_fname[font_index]);
     std::string bold        = std::string(FONTS_FOLDER "/").append(       bold_fname[font_index]);
