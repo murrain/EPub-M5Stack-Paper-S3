@@ -88,7 +88,10 @@ class StateTask
     int16_t   next_itemref_to_get; // Non prioritize item to get next
     int16_t   asap_itemref;        // Prioritize item to get next
     uint8_t * bitset;              // Set of all items processed so far
-    uint8_t   bitset_size;         // bitset byte length
+    uint16_t  bitset_size;         // bitset byte length (uint8_t silently
+                                   // overflowed for books with >2040 spine
+                                   // items, leading to a too-small alloc and
+                                   // out-of-bounds bit access — heap corruption)
     bool      stopping;
     bool      forget_retrieval;    // Forget current item begin processed by retrieval task
 
@@ -239,7 +242,19 @@ class StateTask
             aborting      = false;
             if (bitset) delete [] bitset;
             itemref_count = state_queue_data.itemref_count;
-            bitset_size   = (itemref_count + 7) >> 3;
+            // Guard against malformed EPUBs reporting <= 0 spine items.
+            // Without this, bitset_size = (-1 + 7) >> 3 (or 0) leads to a
+            // zero-byte allocation followed by indexed access at line ~283,
+            // which is undefined behavior.
+            if (itemref_count <= 0) {
+              bitset           = nullptr;
+              bitset_size      = 0;
+              itemref_count    = -1;
+              retriever_iddle  = true;
+              forget_retrieval = true;
+              break;
+            }
+            bitset_size   = (uint16_t)((itemref_count + 7) >> 3);
             bitset        = new uint8_t[bitset_size];
             if (bitset) {
               memset(bitset, 0, bitset_size);
