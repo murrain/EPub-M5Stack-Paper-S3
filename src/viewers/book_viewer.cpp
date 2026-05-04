@@ -173,7 +173,7 @@ BookViewer::build_page_at(const PageLocs::PageId & page_id)
 
         ScreenBottom::show(page_locs.get_page_nbr(page_id), page_locs.get_page_count());
 
-        page.paint();
+        page.paint(Screen::UpdateMode::FAST);
       }
       interp->show_stat();
       interp->release_fmt(new_fmt);
@@ -239,7 +239,7 @@ BookViewer::show_fake_cover()
   page.     add_text(title, fmt);
   page.end_paragraph(fmt);
 
-  page.paint();
+  page.paint(Screen::UpdateMode::FAST);
 }
 
 void
