@@ -95,8 +95,11 @@ static TouchSample gt911_sample(uint16_t * x, uint16_t * y)
   if (!gt911_ok || (x == nullptr) || (y == nullptr)) return TouchSample::UP;
 
   uint8_t status = 0;
+  // A transient I2C glitch on either read should be treated as NO_DATA, not
+  // UP, so an in-progress gesture is preserved across the hiccup rather than
+  // being silently terminated.
   if (gt911_read_reg(gt911_addr, 0x814E, &status, 1) != ESP_OK) {
-    return TouchSample::UP;
+    return TouchSample::NO_DATA;
   }
 
   // Buffer-not-ready: no fresh sample this poll. Do NOT ack — caller treats
@@ -112,7 +115,7 @@ static TouchSample gt911_sample(uint16_t * x, uint16_t * y)
 
   uint8_t data[4] = { 0 };
   if (gt911_read_reg(gt911_addr, 0x8150, data, sizeof(data)) != ESP_OK) {
-    return TouchSample::UP;
+    return TouchSample::NO_DATA;
   }
 
   *x = (uint16_t)((data[1] << 8) | data[0]);
