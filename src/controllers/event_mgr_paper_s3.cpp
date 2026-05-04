@@ -84,24 +84,36 @@ static esp_err_t gt911_read_reg(uint8_t addr, uint16_t reg, uint8_t * data, size
   return ret;
 }
 
-static bool gt911_read_point(uint16_t * x, uint16_t * y)
+// Tri-state result of polling the GT911 controller. Distinguishing NO_DATA
+// from UP is critical: the GT911 buffer-ready bit drops between coordinate
+// updates during an in-progress swipe, and treating those polls as a release
+// would prematurely classify the gesture as a tap.
+enum class TouchSample : uint8_t { DOWN, NO_DATA, UP };
+
+static TouchSample gt911_sample(uint16_t * x, uint16_t * y)
 {
-  if (!gt911_ok || (x == nullptr) || (y == nullptr)) return false;
+  if (!gt911_ok || (x == nullptr) || (y == nullptr)) return TouchSample::UP;
 
   uint8_t status = 0;
-  if (gt911_read_reg(gt911_addr, 0x814E, &status, 1) != ESP_OK) return false;
+  if (gt911_read_reg(gt911_addr, 0x814E, &status, 1) != ESP_OK) {
+    return TouchSample::UP;
+  }
 
-  if ((status & 0x80) == 0) return false;
+  // Buffer-not-ready: no fresh sample this poll. Do NOT ack — caller treats
+  // the previous touch state as still in effect.
+  if ((status & 0x80) == 0) return TouchSample::NO_DATA;
 
   uint8_t points = status & 0x0F;
   if (points == 0) {
     uint8_t zero = 0;
     gt911_write_reg(gt911_addr, 0x814E, &zero, 1);
-    return false;
+    return TouchSample::UP;
   }
 
   uint8_t data[4] = { 0 };
-  if (gt911_read_reg(gt911_addr, 0x8150, data, sizeof(data)) != ESP_OK) return false;
+  if (gt911_read_reg(gt911_addr, 0x8150, data, sizeof(data)) != ESP_OK) {
+    return TouchSample::UP;
+  }
 
   *x = (uint16_t)((data[1] << 8) | data[0]);
   *y = (uint16_t)((data[3] << 8) | data[2]);
@@ -109,7 +121,7 @@ static bool gt911_read_point(uint16_t * x, uint16_t * y)
   uint8_t zero = 0;
   gt911_write_reg(gt911_addr, 0x814E, &zero, 1);
 
-  return true;
+  return TouchSample::DOWN;
 }
 
 static void touch_task(void * param)
@@ -137,7 +149,17 @@ static void touch_task(void * param)
     uint16_t x = 0;
     uint16_t y = 0;
 
-    bool has_touch = gt911_read_point(&x, &y);
+    TouchSample sample = gt911_sample(&x, &y);
+
+    // NO_DATA means the GT911 had no fresh buffer this poll. The finger is
+    // still presumed to be where it was; skip processing entirely so a brief
+    // gap in the controller's stream cannot be misread as a release.
+    if (sample == TouchSample::NO_DATA) {
+      vTaskDelay(pdMS_TO_TICKS(50));
+      continue;
+    }
+
+    bool has_touch = (sample == TouchSample::DOWN);
 
     if (has_touch) {
       if (!touch_active) {
