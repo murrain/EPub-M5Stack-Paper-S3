@@ -245,7 +245,10 @@ BookParamController::input_event(const EventMgr::Event & event)
         if (font              !=              old_font) book_params->put(BookParams::Ident::FONT,               font             );
         if (use_fonts_in_book != old_use_fonts_in_book) book_params->put(BookParams::Ident::USE_FONTS_IN_BOOK,  use_fonts_in_book);
         
-        if (book_params->is_modified()) epub.update_book_format_params();
+        if (book_params->is_modified()) {
+          page_locs.stop_document();
+          epub.update_book_format_params();
+        }
 
         book_params->save();
 

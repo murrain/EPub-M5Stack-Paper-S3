@@ -457,6 +457,7 @@ OptionController::input_event(const EventMgr::Event & event)
 
         if ((old_orientation != orientation) ||
             (old_show_title  != show_title )) {
+          page_locs.stop_document();
           epub.update_book_format_params();
         }
 
@@ -488,7 +489,8 @@ OptionController::input_event(const EventMgr::Event & event)
             (old_font_size          != font_size         ) ||
             (old_default_font       != default_font      ) ||
             (old_use_fonts_in_books != use_fonts_in_books)) {
-          epub.update_book_format_params();  
+          page_locs.stop_document();
+          epub.update_book_format_params();
         }
 
         if (old_default_font != default_font) {
