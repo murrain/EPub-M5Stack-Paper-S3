@@ -107,7 +107,8 @@ extern "C" {
 #endif
 
 bool 
-BooksDir::read_books_directory(char * book_filename, int16_t & book_index)
+BooksDir::read_books_directory(char * book_filename, int16_t & book_index,
+                               bool skip_refresh)
 {
   LOG_D("Reading books directory: %s.", BOOKS_DIR_FILE);
 
@@ -165,6 +166,18 @@ BooksDir::read_books_directory(char * book_filename, int16_t & book_index)
       LOG_E("Not able to set DB Version.");
       return false;
     }
+  }
+
+  if (skip_refresh) {
+    // Warm-wake fast path: skip the SD directory scan + per-file
+    // metadata refresh entirely. The cached DB entries from the
+    // previous session are accurate as long as the user hasn't
+    // added or removed books while powered off (the common case).
+    // Caller is responsible for invoking refresh() at a later
+    // moment (typically when the user navigates to the books
+    // directory) to pick up any changes.
+    LOG_D("Reading directory completed (refresh deferred).");
+    return true;
   }
 
   if (!refresh(book_filename, book_index)) {

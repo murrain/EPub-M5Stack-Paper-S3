@@ -24,6 +24,14 @@ class BooksDirController
     std::string book_filename;
     bool        book_was_shown;
 
+    // True when setup() took the warm-wake fast path and skipped the
+    // BooksDir refresh. Cleared the first time enter() runs (which is
+    // when the user navigates to the books directory and we owe them
+    // a fresh listing). See BooksDirController::enter for the flush.
+    // Initialized at declaration so the invariant holds even if a
+    // future code path reaches enter() without going through setup().
+    bool        refresh_deferred = false;
+
     PageLocs::PageId book_page_id;
     BooksDirViewer * books_dir_viewer;
     int8_t viewer_id;
