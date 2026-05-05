@@ -11,7 +11,11 @@
 #pragma once
 #include "global.hpp"
 
-#if EPUB_INKPLATE_BUILD
+// USB Drive Mode is PaperS3-only — it depends on the GPIO 19/20 USB
+// peripheral and the screen.panel_clear() routine that lives in the
+// PaperS3 screen variant. Tighten the gate so the viewer cannot leak
+// into Inkplate builds via a transitive include.
+#if EPUB_INKPLATE_BUILD && defined(BOARD_TYPE_PAPER_S3)
 
 namespace UsbMscViewer {
 

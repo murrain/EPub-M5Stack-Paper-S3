@@ -4,7 +4,7 @@
 
 #include "viewers/usb_msc_viewer.hpp"
 
-#if EPUB_INKPLATE_BUILD
+#if EPUB_INKPLATE_BUILD && defined(BOARD_TYPE_PAPER_S3)
 
 #include "viewers/page.hpp"
 #include "models/fonts.hpp"
