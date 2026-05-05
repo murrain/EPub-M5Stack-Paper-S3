@@ -22,6 +22,11 @@
   #include "esp_system.h"
 #endif
 
+#if EPUB_INKPLATE_BUILD && defined(BOARD_TYPE_PAPER_S3)
+  #include "usb_msc_paper_s3.hpp"
+  #include "viewers/usb_msc_viewer.hpp"
+#endif
+
 // static int8_t boolean_value;
 
 static Screen::Orientation     orientation;
@@ -189,11 +194,11 @@ default_parameters()
 static void
 wifi_mode()
 {
-  #if EPUB_INKPLATE_BUILD  
+  #if EPUB_INKPLATE_BUILD
     epub.close_file();
     fonts.clear(true);
     fonts.clear_glyph_caches();
-    
+
     event_mgr.set_stay_on(true); // DO NOT sleep
 
     if (start_web_server()) {
@@ -201,6 +206,37 @@ wifi_mode()
     }
   #endif
 }
+
+#if EPUB_INKPLATE_BUILD && defined(BOARD_TYPE_PAPER_S3)
+static void
+usb_drive_mode()
+{
+  // Same teardown shape as wifi_mode: close the active book, free
+  // the font caches, prevent idle-sleep so the host doesn't lose
+  // the device mid-transfer.
+  epub.close_file();
+  fonts.clear(true);
+  fonts.clear_glyph_caches();
+
+  event_mgr.set_stay_on(true);
+
+  // Render the "USB Drive Mode" banner BEFORE handing the SD over
+  // to TinyUSB. After UsbMsc::start() the FATFS overlay is gone so
+  // we lose access to fonts/wallpapers on the card — but the panel
+  // image is already latched and stays visible for the entire
+  // duration of the host connection thanks to e-ink retention.
+  UsbMscViewer::show();
+
+  if (UsbMsc::start()) {
+    option_controller.set_wait_for_key_after_usb();
+  } else {
+    msg_viewer.show(MsgViewer::MsgType::ALERT, false, true,
+                    "USB Drive Mode failed",
+                    "Could not initialize the USB Mass Storage stack. "
+                    "The device will continue normally; please try again.");
+  }
+}
+#endif
 
 static void
 init_nvs()
@@ -335,6 +371,12 @@ static MenuViewer::MenuEntry menu[] = {
   { MenuViewer::Icon::MAIN_PARAMS,   "Main parameters",                      main_parameters                  , true,  true  },
   { MenuViewer::Icon::FONT_PARAMS,   "Default e-books parameters",           default_parameters               , true,  true  },
   { MenuViewer::Icon::WIFI,          "WiFi Access to the e-books folder",    wifi_mode                        , true,  true  },
+  #if EPUB_INKPLATE_BUILD && defined(BOARD_TYPE_PAPER_S3)
+    // Reuses the WIFI icon glyph for v1 — both entries are
+    // "external file-transfer" features and the labels make the
+    // distinction. A dedicated USB-cable glyph can be added later.
+    { MenuViewer::Icon::WIFI,        "USB Drive Mode (mount SD on computer)", usb_drive_mode                   , true,  true  },
+  #endif
   { MenuViewer::Icon::REFRESH,       "Refresh the e-books list",             CommonActions::refresh_books_dir , true,  true  },
   #if !(INKPLATE_6PLUS || MENU_6PLUS)
     { MenuViewer::Icon::CLR_HISTORY, "Clear e-books' read history",          init_nvs                         , true,  true  },
@@ -520,9 +562,9 @@ OptionController::input_event(const EventMgr::Event & event)
 
   #if EPUB_INKPLATE_BUILD
     else if (wait_for_key_after_wifi) {
-      msg_viewer.show(MsgViewer::MsgType::INFO, 
-                      false, true, 
-                      "Restarting", 
+      msg_viewer.show(MsgViewer::MsgType::INFO,
+                      false, true,
+                      "Restarting",
                       "The device is now restarting. Please wait.");
       wait_for_key_after_wifi = false;
       stop_web_server();
@@ -532,6 +574,22 @@ OptionController::input_event(const EventMgr::Event & event)
         books_dir.refresh(nullptr, dummy, true);
       }
       esp_restart();
+    }
+  #endif
+
+  #if EPUB_INKPLATE_BUILD && defined(BOARD_TYPE_PAPER_S3)
+    else if (wait_for_key_after_usb) {
+      // Don't try to do graceful TinyUSB teardown — the host may be
+      // mid-write. exit_via_restart shows a "Restarting" splash and
+      // calls esp_restart(); the next boot mounts a fresh FATFS and
+      // picks up any newly-uploaded files via the standard refresh.
+      msg_viewer.show(MsgViewer::MsgType::INFO,
+                      false, true,
+                      "Restarting",
+                      "Disconnecting USB drive. Please wait.");
+      wait_for_key_after_usb = false;
+      UsbMsc::exit_via_restart();
+      // Unreachable; exit_via_restart is [[noreturn]].
     }
   #endif
 

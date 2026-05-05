@@ -25,17 +25,25 @@ class OptionController
 
     bool wait_for_key_after_wifi;
 
+    // Set when the device entered USB Drive Mode (TinyUSB MSC). The
+    // exit path mirrors WiFi mode: any input event triggers a clean
+    // esp_restart() so the next boot picks up new files via the
+    // normal books_dir refresh and the FATFS gets re-mounted from
+    // scratch — no in-place teardown of the live MSC stack.
+    bool wait_for_key_after_usb;
+
   public:
-    OptionController() : main_form_is_shown(false), 
+    OptionController() : main_form_is_shown(false),
                          font_form_is_shown(false),
-                         books_refresh_needed(false), 
+                         books_refresh_needed(false),
                          #if DATE_TIME_RTC
                            date_time_form_is_shown(false),
                          #endif
                          #if INKPLATE_6PLUS
                            calibration_is_shown(false),
                          #endif
-                         wait_for_key_after_wifi(false) { };
+                         wait_for_key_after_wifi(false),
+                         wait_for_key_after_usb(false) { };
                          
     void    input_event(const EventMgr::Event & event);
     void          enter();
@@ -53,8 +61,20 @@ class OptionController
       inline void    set_calibration_is_shown() { calibration_is_shown    = true; }
     #endif
 
-    inline void set_wait_for_key_after_wifi() { 
-      wait_for_key_after_wifi   = true; 
+    inline void set_wait_for_key_after_wifi() {
+      wait_for_key_after_wifi   = true;
+      main_form_is_shown        = false;
+      font_form_is_shown        = false;
+      #if DATE_TIME_RTC
+        date_time_form_is_shown = false;
+      #endif
+      #if INKPLATE_6PLUS
+        calibration_is_shown    = false;
+      #endif
+    }
+
+    inline void set_wait_for_key_after_usb() {
+      wait_for_key_after_usb    = true;
       main_form_is_shown        = false;
       font_form_is_shown        = false;
       #if DATE_TIME_RTC
