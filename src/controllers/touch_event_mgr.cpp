@@ -35,6 +35,7 @@ const char * EventMgr::event_str[8] = { "NONE",        "TAP",           "HOLD", 
   #include "esp.hpp"
   #include "viewers/msg_viewer.hpp"
   #include "viewers/sleep_screen_viewer.hpp"
+  #include "models/session_state.hpp"
 
   #include "touch_screen.hpp"
   #include "logging.hpp"
@@ -720,7 +721,7 @@ const char * EventMgr::event_str[8] = { "NONE",        "TAP",           "HOLD", 
                 light_sleep_duration);
             #endif
             ESP::delay(1000);
-
+            SessionState::mark_entering_deep_sleep();
             inkplate_platform.deep_sleep(TouchScreen::INTERRUPT_PIN, 0);
           }
         }

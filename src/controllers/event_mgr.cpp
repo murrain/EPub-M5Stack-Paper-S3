@@ -23,6 +23,7 @@
   #include "inkplate_platform.hpp"
   #include "viewers/msg_viewer.hpp"
   #include "viewers/sleep_screen_viewer.hpp"
+  #include "models/session_state.hpp"
   #include "esp.hpp"
 
   #if EXTENDED_CASE
@@ -324,6 +325,7 @@
                 light_sleep_duration);
             #endif
             ESP::delay(1000);
+            SessionState::mark_entering_deep_sleep();
             inkplate_platform.deep_sleep(INT_PIN, 1);
           }
         }

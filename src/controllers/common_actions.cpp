@@ -13,6 +13,7 @@
 #include "viewers/menu_viewer.hpp"
 #include "viewers/sleep_screen_viewer.hpp"
 #include "models/books_dir.hpp"
+#include "models/session_state.hpp"
 
 #if EPUB_INKPLATE_BUILD
   #include "inkplate_platform.hpp"
@@ -75,6 +76,10 @@ CommonActions::power_it_off()
     // a too-short delay here can leave a half-rendered sleep screen
     // visible for the entire deep-sleep duration.
     ESP::delay(800);
+    // Persist the deep-sleep marker AFTER all rendering is committed
+    // and just before the actual sleep call. Anything that goes wrong
+    // before this point still leaves the next boot in cold-boot state.
+    SessionState::mark_entering_deep_sleep();
     inkplate_platform.deep_sleep(INT_PIN, LEVEL);
   #else
     extern void exit_app();
