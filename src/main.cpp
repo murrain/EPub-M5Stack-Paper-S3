@@ -17,6 +17,7 @@
   #include "models/epub.hpp"
   #include "models/config.hpp"
   #include "models/nvs_mgr.hpp"
+  #include "models/session_state.hpp"
   #include "screen.hpp"
   #include "inkplate_platform.hpp"
   #if defined(BOARD_TYPE_PAPER_S3)
@@ -45,8 +46,14 @@
   mainTask(void * params) 
   {
     LOG_I("EPub-Inkplate Startup.");
-    
+
     bool nvs_mgr_res = nvs_mgr.setup();
+
+    // Read the deep-sleep marker very early so all later boot-path code
+    // can branch on SessionState::is_warm_wake(). The marker is consumed
+    // (cleared) on read so any crash mid-boot defaults the next attempt
+    // to a safe cold-boot path.
+    SessionState::init_at_boot();
 
     #if DEBUGGING
       for (int i = 10; i > 0; i--) {
