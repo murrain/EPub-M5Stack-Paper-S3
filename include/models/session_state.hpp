@@ -43,7 +43,17 @@ namespace SessionState {
 
   /// True if this boot is a clean wake from a deliberate deep_sleep.
   /// Always returns false until init_at_boot() has been called.
+  /// Call clear_warm_wake() once the resume-budget has been consumed —
+  /// otherwise the flag stays true for the entire process lifetime
+  /// and would mis-classify later in-session navigation as a resume.
   bool is_warm_wake();
+
+  /// Drop the warm-wake state for the rest of this session. After
+  /// this call, is_warm_wake() returns false. Intended to be called
+  /// from the first user-content render that completes the resume —
+  /// e.g., after the first book page paints — so any subsequent
+  /// book/menu transitions get their normal splash UX.
+  void clear_warm_wake();
 
   /// Persist the deep-sleep marker so the next boot can take the
   /// warm-wake fast path. Call from clean sleep entry points only —

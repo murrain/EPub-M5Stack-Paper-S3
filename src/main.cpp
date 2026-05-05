@@ -194,7 +194,14 @@
           inkplate_platform.deep_sleep(INT_PIN, LEVEL);
         }
 
-        msg_viewer.show(MsgViewer::MsgType::INFO, false, true, "Starting", "One moment please...");
+        // On warm wake the sleep-screen / wallpaper is still latched on
+        // the panel and serves as the boot splash — show "Starting…"
+        // only on a real cold boot. Saves a ~600-800 ms GC16 update
+        // and avoids replacing the user's wallpaper with a generic
+        // placeholder for no reason.
+        if (!SessionState::is_warm_wake()) {
+          msg_viewer.show(MsgViewer::MsgType::INFO, false, true, "Starting", "One moment please...");
+        }
 
         books_dir_controller.setup();
         LOG_D("Initialization completed");

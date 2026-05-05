@@ -66,6 +66,14 @@ bool SessionState::is_warm_wake()
   return s_initialized && s_warm_wake;
 }
 
+void SessionState::clear_warm_wake()
+{
+  if (s_warm_wake) {
+    LOG_D("Warm-wake budget consumed; subsequent transitions get normal UX");
+  }
+  s_warm_wake = false;
+}
+
 void SessionState::mark_entering_deep_sleep()
 {
   nvs_handle_t h;

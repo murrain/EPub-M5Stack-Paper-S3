@@ -8,6 +8,7 @@
 #include "controllers/app_controller.hpp"
 #include "controllers/books_dir_controller.hpp"
 #include "models/epub.hpp"
+#include "models/session_state.hpp"
 #include "viewers/book_viewer.hpp"
 #include "viewers/page.hpp"
 #include "viewers/msg_viewer.hpp"
@@ -50,8 +51,19 @@ BookController::open_book_file(
 {
   LOG_D("===> open_book_file()...");
 
-  msg_viewer.show(MsgViewer::MsgType::BOOK, false, false, "Loading a book",
-     "The book \" %s \" is loading. Please wait.", book_title.c_str());
+  // Skip the "Loading a book" splash on warm wake so the sleep-screen
+  // / wallpaper stays visible until the first page is actually drawn.
+  // Replacing a beautiful wallpaper with a generic loading message for
+  // ~700 ms is the worst possible UX on resume.
+  const bool warm = SessionState::is_warm_wake();
+  if (!warm) {
+    msg_viewer.show(MsgViewer::MsgType::BOOK, false, false, "Loading a book",
+       "The book \" %s \" is loading. Please wait.", book_title.c_str());
+  }
+  // Consume the warm-wake budget here — subsequent book opens during
+  // this session are user-driven navigation (back to dir, pick another
+  // book) and deserve the normal splash UX.
+  SessionState::clear_warm_wake();
 
   bool new_document = book_filename != epub.get_current_filename();
 
