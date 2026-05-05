@@ -12,12 +12,18 @@
 #include "esp_err.h"
 #include "esp_system.h"
 #include "tinyusb.h"
-#include "tusb_msc_storage.h"
+#include "tinyusb_msc.h"
 
 namespace
 {
   static constexpr char const * TAG = "UsbMsc";
 
+  // True between a successful start() and exit_via_restart(). Never
+  // cleared in-process: the only exit path is esp_restart(), which
+  // re-initializes everything from a fresh boot. Keeping the field
+  // here (rather than a local in start()) lets is_active() report
+  // the live state to UI callers without round-tripping through
+  // TinyUSB.
   bool s_active = false;
 }
 
@@ -34,39 +40,43 @@ bool UsbMsc::start()
     return false;
   }
 
-  // Hand the SD card over to TinyUSB MSC. The wrapper takes a copy
-  // of what it needs; it does NOT take ownership of the handle, so
-  // we don't null out our own reference here.
+  // v2 esp_tinyusb manages the FATFS-vs-USB ownership of the card
+  // internally — we register the storage with the live card handle
+  // and TinyUSB swaps the mount point to USB when we ask. Do NOT
+  // unmount FATFS ourselves: esp_vfs_fat_sdcard_unmount() free()s
+  // the sdmmc_card_t allocation, and TinyUSB would then issue
+  // block I/O against a dangling pointer for the entire host
+  // session.
   tinyusb_msc_sdmmc_config_t msc_cfg = {};
   msc_cfg.card = card;
-  // Leave callbacks (mount_changed_cb, etc.) as nullptr — we don't
-  // need to react to host mount/unmount events for v1. The pattern
-  // is well-supported by the esp_tinyusb component.
-  esp_err_t ret = tinyusb_msc_storage_init_sdmmc(&msc_cfg);
+  esp_err_t ret = tinyusb_msc_new_storage_sdmmc(&msc_cfg);
   if (ret != ESP_OK) {
-    LOG_E("tinyusb_msc_storage_init_sdmmc failed (%s)", esp_err_to_name(ret));
+    LOG_E("tinyusb_msc_new_storage_sdmmc failed (%s)", esp_err_to_name(ret));
     return false;
   }
 
-  // Tear down the FATFS overlay so the host has exclusive block
-  // access. Done AFTER the MSC storage init succeeds so we don't
-  // leave the card unmounted on a pure-init failure.
-  if (!inkplate_platform.unmount_sd_fat()) {
-    LOG_E("Failed to unmount FATFS for USB-Drive Mode; aborting");
-    tinyusb_msc_storage_deinit();
+  // Switch ownership of the storage from the application's FATFS
+  // mount to the USB host. v2 esp_tinyusb internally handles the
+  // FATFS unmount, the card-handle preservation, and the host-side
+  // notification — replacing the unmount_sd_fat() call we used in
+  // the v1 shim.
+  ret = tinyusb_msc_storage_mount_to_usb();
+  if (ret != ESP_OK) {
+    LOG_E("tinyusb_msc_storage_mount_to_usb failed (%s)", esp_err_to_name(ret));
+    tinyusb_msc_delete_storage();
     return false;
   }
 
   // Install the TinyUSB device driver. With CDC disabled in
   // sdkconfig and only MSC enabled, the resulting USB device is a
   // single-interface MSC drive on the host's enumeration tree.
-  tinyusb_config_t tusb_cfg = {};
   // Default descriptors come from the Kconfig values
-  // (CONFIG_TINYUSB_DESC_*) we set in sdkconfig.paper_s3.
+  // (CONFIG_TINYUSB_DESC_*) set in sdkconfig.paper_s3.
+  tinyusb_config_t tusb_cfg = {};
   ret = tinyusb_driver_install(&tusb_cfg);
   if (ret != ESP_OK) {
     LOG_E("tinyusb_driver_install failed (%s)", esp_err_to_name(ret));
-    tinyusb_msc_storage_deinit();
+    tinyusb_msc_delete_storage();
     return false;
   }
 

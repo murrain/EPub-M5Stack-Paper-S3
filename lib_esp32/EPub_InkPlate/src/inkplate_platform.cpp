@@ -151,24 +151,4 @@ sdmmc_card_t * InkPlatePlatform::get_sd_card()
   return s_sd_card;
 }
 
-bool InkPlatePlatform::unmount_sd_fat()
-{
-  if (s_sd_card == nullptr) {
-    LOG_W("unmount_sd_fat called with no card mounted");
-    return true;
-  }
-  esp_err_t ret = esp_vfs_fat_sdcard_unmount("/sdcard", s_sd_card);
-  if (ret != ESP_OK) {
-    LOG_E("Paper S3: esp_vfs_fat_sdcard_unmount failed (%s)", esp_err_to_name(ret));
-    return false;
-  }
-  // The unmount call destroys the card handle. Clear our pointer so
-  // a future setup() call can re-init from scratch (we don't expect
-  // that path during USB-Drive Mode — the exit triggers esp_restart
-  // which gives us a clean boot — but the invariant is correct).
-  s_sd_card = nullptr;
-  LOG_I("Paper S3: FATFS unmounted from /sdcard");
-  return true;
-}
-
 #endif // BOARD_TYPE_PAPER_S3
