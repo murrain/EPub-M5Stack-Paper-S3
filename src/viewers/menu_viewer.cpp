@@ -154,11 +154,16 @@ void MenuViewer::show(MenuEntry * the_menu, uint8_t entry_index, bool clear_scre
   #endif
 
   page.put_highlight(
-    Dim(Screen::get_width() - 20, 3), 
+    Dim(Screen::get_width() - 20, 3),
     Pos(10, region_height - 12));
 
   ScreenBottom::show();
 
+  // First show after entering the menu — leave to BUDGETED so a
+  // pending force_full_update from the controller transition can
+  // emit a clean GC16 and flush book-page ghosting. Subsequent
+  // in-menu interactions (highlight, tap-and-hold hint) below use
+  // FAST explicitly.
   page.paint(clear_screen);
 }
 
@@ -219,14 +224,15 @@ MenuViewer::clear_highlight()
       hint_shown     = false;
 
       page.clear_highlight(
-        Dim(entry_locs[current_entry_index].dim.width + 8, entry_locs[current_entry_index].dim.height + 8), 
+        Dim(entry_locs[current_entry_index].dim.width + 8, entry_locs[current_entry_index].dim.height + 8),
         Pos(entry_locs[current_entry_index].pos.x - 4,     entry_locs[current_entry_index].pos.y - 4     ));
 
       page.clear_region(Dim(Screen::get_width(), text_height), Pos(0, text_ypos - line_height));
       page.put_str_at(TOUCH_AND_HOLD_STR, Pos{ 10, text_ypos }, fmt);
     }
 
-    page.paint(false);
+    // Highlight clear is a transient UI tweak — DU is fine.
+    page.paint(Screen::UpdateMode::FAST, false);
   #endif
 }
 
@@ -267,14 +273,17 @@ MenuViewer::event(const EventMgr::Event & event)
 
           fmt.font_index =  1;
           fmt.font_size  = CAPTION_SIZE;
-        
+
           page.clear_region(Dim(Screen::get_width(), text_height), Pos(0, text_ypos - line_height));
 
-          std::string txt = menu[current_entry_index].caption; 
+          std::string txt = menu[current_entry_index].caption;
           page.put_str_at(txt, Pos{ 10, text_ypos }, fmt);
           hint_shown = true;
 
-          page.paint(false);
+          // Tap-and-hold hint is a transient overlay; DU keeps the
+          // user in feedback within ~120 ms instead of waiting for
+          // a 450 ms GL16.
+          page.paint(Screen::UpdateMode::FAST, false);
         }
         break;
 
@@ -306,7 +315,9 @@ MenuViewer::event(const EventMgr::Event & event)
                 Dim(entry_locs[current_entry_index].dim.width + 8, entry_locs[current_entry_index].dim.height + 8),
                 Pos(entry_locs[current_entry_index].pos.x - 4,     entry_locs[current_entry_index].pos.y - 4     ));
 
-              page.paint(false);
+              // Tap acknowledgement before invoking the action —
+              // user wants to see the highlight as fast as possible.
+              page.paint(Screen::UpdateMode::FAST, false);
             }
             else {
               hint_shown = false;
@@ -380,8 +391,9 @@ MenuViewer::event(const EventMgr::Event & event)
 
     ScreenBottom::show();
 
-    page.paint(false);
+    // Inkplate keypad-driven menu navigation: same FAST treatment.
+    page.paint(Screen::UpdateMode::FAST, false);
   #endif
-  
+
   return false;
 }
