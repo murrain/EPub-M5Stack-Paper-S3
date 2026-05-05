@@ -267,6 +267,17 @@ static inline void set_pixel_nibble_screen(uint16_t x, uint16_t y, uint8_t nibbl
   set_pixel_nibble_physical(y, (uint16_t)((EPD_HEIGHT - 1) - x), nibble);
 }
 
+// Screen-coordinate hot loops: with EPD_ROT_INVERTED_PORTRAIT the
+// screen-X axis maps to physical-Y (rows) in the framebuffer, and the
+// screen-Y axis maps to physical-X (columns within a row). The
+// previous implementation called set_pixel_nibble_screen() per pixel,
+// which recomputed `phys_row * (EPD_WIDTH/2)` on every glyph pixel
+// and walked through one extra inline call. For a typical book page
+// (~1500-3000 glyphs × ~10×15 pixels each) that's hundreds of
+// thousands of redundant multiplies/branches. Hoist the per-row base
+// pointer out of the inner loop so the inner step is just one address
+// add and one read-modify-write per pixel.
+
 void Screen::draw_bitmap(const unsigned char * bitmap_data, Dim dim, Pos pos)
 {
   if (!s_epd_initialized || (bitmap_data == nullptr)) return;
@@ -277,12 +288,24 @@ void Screen::draw_bitmap(const unsigned char * bitmap_data, Dim dim, Pos pos)
   if (x_max > width)  x_max = width;
   if (y_max > height) y_max = height;
 
-  // For best locality with the rotated coordinate system, iterate X (screen) outer.
   for (uint16_t x = pos.x; x < x_max; ++x) {
+    // Hoisted: physical row for this screen-X column. Every (x, *)
+    // pixel writes into the same framebuffer row — recomputing the
+    // row index per pixel was the dominant cost.
+    const uint16_t phys_row = (uint16_t)((EPD_HEIGHT - 1) - x);
+    uint8_t * const row_base = &s_framebuffer[phys_row * (EPD_WIDTH / 2)];
+    const uint16_t x_off_in_bmp = (uint16_t)(x - pos.x);
+
     for (uint16_t y = pos.y; y < y_max; ++y) {
-      const uint32_t p = (uint32_t)(y - pos.y) * dim.width + (x - pos.x);
-      const uint8_t v = bitmap_data[p];
-      set_pixel_nibble_screen(x, y, gray8_to_nibble(v));
+      const uint32_t p = (uint32_t)(y - pos.y) * dim.width + x_off_in_bmp;
+      const uint8_t  nib = gray8_to_nibble(bitmap_data[p]);
+      const uint16_t phys_col = y;
+      uint8_t * const buf_ptr = row_base + (phys_col >> 1);
+      if (phys_col & 1) {
+        *buf_ptr = (uint8_t)((*buf_ptr & 0x0F) | ((nib & 0x0F) << 4));
+      } else {
+        *buf_ptr = (uint8_t)((*buf_ptr & 0xF0) | (nib & 0x0F));
+      }
     }
   }
 }
@@ -300,14 +323,28 @@ void Screen::draw_glyph(const unsigned char * bitmap_data, Dim dim, Pos pos, uin
   // Glyph buffer is 8-bit alpha (0=transparent..255=opaque). We draw it as
   // black with intensity proportional to alpha.
   for (uint16_t i = 0; i < dim.width && (pos.x + i) < x_max; ++i) {
-    const uint16_t x = (uint16_t)(pos.x + i);
+    // Hoist the row-base pointer for this column out of the inner
+    // loop. The previous implementation recomputed
+    //   buf_ptr = &s_framebuffer[((EPD_HEIGHT-1)-(pos.x+i)) * (EPD_WIDTH/2) + (...>>1)]
+    // for every glyph pixel, paying a multiply + an outer-coord
+    // subtraction per pixel. Now the inner loop is just one address
+    // add (phys_col>>1) and the nibble RMW.
+    const uint16_t phys_row = (uint16_t)((EPD_HEIGHT - 1) - (pos.x + i));
+    uint8_t * const row_base = &s_framebuffer[phys_row * (EPD_WIDTH / 2)];
+    const unsigned char * const col_base = bitmap_data + i;
+
     for (uint16_t j = 0; j < dim.height && (pos.y + j) < y_max; ++j) {
-      const uint16_t y = (uint16_t)(pos.y + j);
-      const uint8_t a = bitmap_data[j * pitch + i];
+      const uint8_t a = col_base[j * pitch];
       if (!a) continue;
       const uint8_t nib = alpha8_to_nibble(a);
       if (nib == 0x0F) continue;
-      set_pixel_nibble_screen(x, y, nib);
+      const uint16_t phys_col = (uint16_t)(pos.y + j);
+      uint8_t * const buf_ptr = row_base + (phys_col >> 1);
+      if (phys_col & 1) {
+        *buf_ptr = (uint8_t)((*buf_ptr & 0x0F) | ((nib & 0x0F) << 4));
+      } else {
+        *buf_ptr = (uint8_t)((*buf_ptr & 0xF0) | (nib & 0x0F));
+      }
     }
   }
 }
