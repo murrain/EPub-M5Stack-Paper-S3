@@ -1,0 +1,9 @@
+## App-level ESP-IDF Component Manager dependencies.
+##
+## espressif/esp_tinyusb provides the TinyUSB stack plus the high-level
+## USB MSC storage helpers (`tinyusb_msc_storage_init_sdmmc`) that
+## the PaperS3 USB-Drive Mode is built on. Pinning a permissive range
+## so we get bug-fix releases without surprise major-version churn.
+
+dependencies:
+  espressif/esp_tinyusb: "^1.4"
