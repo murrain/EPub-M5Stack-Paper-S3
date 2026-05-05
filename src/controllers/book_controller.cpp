@@ -63,6 +63,13 @@ BookController::open_book_file(
   // Consume the warm-wake budget here — subsequent book opens during
   // this session are user-driven navigation (back to dir, pick another
   // book) and deserve the normal splash UX.
+  //
+  // Cleared unconditionally (before the actual open work). If
+  // open_file() fails for the resume target, the user is returned to
+  // the books-dir and any retry there gets normal splash UX, which is
+  // the right semantics — the resume *was* attempted, the wallpaper
+  // was preserved as long as possible, and a failed resume is now a
+  // fresh user-driven navigation.
   SessionState::clear_warm_wake();
 
   bool new_document = book_filename != epub.get_current_filename();

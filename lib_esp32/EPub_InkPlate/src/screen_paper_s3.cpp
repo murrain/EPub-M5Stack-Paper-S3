@@ -162,26 +162,22 @@ void Screen::setup(PixelResolution resolution, Orientation orientation,
     if (!preserve_panel_image) {
       // Cold-boot path: drive the panel through its full clearing
       // waveform so we start from a known white state regardless of
-      // what was last latched on the cells.
+      // what was last latched on the cells. After fullclear the
+      // panel matches the all-white framebuffer and there is no
+      // ghosting to flush, so s_force_full stays false.
       epd_fullclear(&s_hl, s_temperature);
-    } else {
-      // Warm-wake path: skip the ~700ms epd_fullclear so the
-      // sleep-screen / wallpaper drawn before deep sleep stays
-      // visible during the rest of boot. The first real render
-      // (book page, books-dir, etc.) replaces it with a single
-      // GC16 update, so the user sees one transition instead of
-      // black -> splash -> book.
-      //
-      // Forcing the next update to be a full refresh avoids any
-      // ghosting from the long retention period and keeps the
-      // partial-budget invariant correct.
-      s_force_full = true;
     }
+    // Warm-wake path: skip the ~700 ms epd_fullclear so the
+    // sleep-screen / wallpaper drawn before deep sleep stays
+    // visible during the rest of boot. The first real render
+    // (book page, books-dir, etc.) replaces it with a single
+    // GC16 update, so the user sees one transition instead of
+    // black -> splash -> book. Forcing the next update to be a
+    // full refresh flushes any ghosting that may have built up
+    // during the long retention period.
+    s_force_full     = preserve_panel_image;
     s_epd_initialized = true;
-    if (!preserve_panel_image) {
-      s_force_full = false;
-    }
-    s_partial_count = PARTIAL_COUNT_ALLOWED;
+    s_partial_count   = PARTIAL_COUNT_ALLOWED;
   }
 
   // On Paper S3 we always drive the panel in grayscale (4-bit via epdiy).

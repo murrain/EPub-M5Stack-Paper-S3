@@ -50,9 +50,20 @@ void SessionState::init_at_boot()
   // Always clear the persisted marker now that we've consumed it.
   // If anything later in boot crashes, the next boot will see the
   // marker absent and run the safe cold-boot path.
+  //
+  // If the clear write fails (NVS full / corrupted), the persisted
+  // marker stays 1 and the *next* boot will be classified as warm
+  // again — at worst a single extra "skipped epd_fullclear" cycle.
+  // The display logic is idempotent under that case (the next real
+  // render is still a forced GC16) so the worst observable effect
+  // is a slightly stale panel image instead of an all-white one.
   if (s_warm_wake) {
-    if (nvs_set_u8(h, KEY, 0) == ESP_OK) {
+    esp_err_t set_err = nvs_set_u8(h, KEY, 0);
+    if (set_err == ESP_OK) {
       nvs_commit(h);
+    } else {
+      LOG_W("Failed to clear deep-sleep marker (%s); next boot may also classify as warm",
+            esp_err_to_name(set_err));
     }
   }
 

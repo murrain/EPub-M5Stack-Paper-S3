@@ -29,6 +29,20 @@
 //   2. The hardware-failure deep-sleep paths in main.cpp do NOT mark,
 //      so the next boot from a hardware-failure shutdown is treated
 //      as a cold boot and runs full init / shows the error UX cleanly.
+//
+// Known degradations:
+//   - A firmware OTA that triggers an NVS schema migration causes
+//     nvs_mgr.setup() to call nvs_flash_erase() before init_at_boot()
+//     runs. The "session" namespace is wiped along with everything
+//     else, so the first boot of the new firmware after an OTA always
+//     classifies as a cold boot regardless of how the device went
+//     down. Acceptable: OTA is rare, and a one-time visible cold-boot
+//     splash is preferable to skipping post-update validation work.
+//   - The marker is set/read but never used on Inkplate boards (the
+//     hardware does not power-cycle on deep sleep, so the standard
+//     ESP-IDF wake-cause API works there). The orphan NVS key is
+//     harmless but if Inkplate ever wants its own warm-wake path it
+//     should consume the same marker for consistency.
 
 #pragma once
 #include "global.hpp"
