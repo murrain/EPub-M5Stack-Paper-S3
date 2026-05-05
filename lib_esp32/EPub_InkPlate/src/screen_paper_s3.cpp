@@ -140,7 +140,8 @@ void Screen::panel_clear()
   epd_fullclear(&s_hl, s_temperature);
 }
 
-void Screen::setup(PixelResolution resolution, Orientation orientation)
+void Screen::setup(PixelResolution resolution, Orientation orientation,
+                   bool preserve_panel_image)
 {
   if (!s_epd_initialized) {
     epd_set_board(&paper_s3_board);
@@ -158,11 +159,28 @@ void Screen::setup(PixelResolution resolution, Orientation orientation)
     s_framebuffer = epd_hl_get_framebuffer(&s_hl);
 
     epd_poweron();
-    // Ensure any previous image on the panel is fully cleared on first
-    // boot so we start from a clean white screen.
-    epd_fullclear(&s_hl, s_temperature);
+    if (!preserve_panel_image) {
+      // Cold-boot path: drive the panel through its full clearing
+      // waveform so we start from a known white state regardless of
+      // what was last latched on the cells.
+      epd_fullclear(&s_hl, s_temperature);
+    } else {
+      // Warm-wake path: skip the ~700ms epd_fullclear so the
+      // sleep-screen / wallpaper drawn before deep sleep stays
+      // visible during the rest of boot. The first real render
+      // (book page, books-dir, etc.) replaces it with a single
+      // GC16 update, so the user sees one transition instead of
+      // black -> splash -> book.
+      //
+      // Forcing the next update to be a full refresh avoids any
+      // ghosting from the long retention period and keeps the
+      // partial-budget invariant correct.
+      s_force_full = true;
+    }
     s_epd_initialized = true;
-    s_force_full = false;
+    if (!preserve_panel_image) {
+      s_force_full = false;
+    }
     s_partial_count = PARTIAL_COUNT_ALLOWED;
   }
 
@@ -172,7 +190,13 @@ void Screen::setup(PixelResolution resolution, Orientation orientation)
   (void)resolution;
   set_pixel_resolution(PixelResolution::THREE_BITS, true);
   set_orientation(orientation);
-  clear();
+  if (!preserve_panel_image) {
+    // clear() resets the framebuffer to all-white. On warm wake we
+    // intentionally skip this so the panel image stays in sync with
+    // the framebuffer (both still hold the sleep-screen content)
+    // until the first real render overwrites them.
+    clear();
+  }
 }
 
 void Screen::set_pixel_resolution(PixelResolution resolution, bool force)

@@ -142,7 +142,11 @@
           config.get(Config::Ident::PIXEL_RESOLUTION, (int8_t *) &resolution);
         #endif
 
-        screen.setup(resolution, orientation);
+        // On warm wake the panel still latches the sleep-screen image
+        // from before deep sleep — keep it visible by skipping the
+        // ~700 ms boot epd_fullclear.
+        screen.setup(resolution, orientation,
+                     /*preserve_panel_image=*/SessionState::is_warm_wake());
 
         event_mgr.setup();
         event_mgr.set_orientation(orientation);

@@ -67,8 +67,9 @@ class Screen : NonCopyable
 
   public:
     static Screen &               get_singleton() noexcept { return singleton; }
-    void                                  setup(PixelResolution resolution, 
-                                                Orientation     orientation);
+    void                                  setup(PixelResolution resolution,
+                                                Orientation     orientation,
+                                                bool            preserve_panel_image = false);
     void                   set_pixel_resolution(PixelResolution resolution, bool force = false);
     void                        set_orientation(Orientation orient);
     inline PixelResolution get_pixel_resolution() { return pixel_resolution; }

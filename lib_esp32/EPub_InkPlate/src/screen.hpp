@@ -71,7 +71,15 @@ class Screen : NonCopyable
 
   public:
     static Screen & get_singleton() noexcept { return singleton; }
-    void setup(PixelResolution resolution, Orientation orientation);
+    /// Initialize the e-paper hardware. When `preserve_panel_image` is
+    /// true the boot-time epd_fullclear (a ~700ms clearing waveform that
+    /// drives the panel back to all-white) and the framebuffer wipe are
+    /// both skipped, leaving whatever image is currently latched on the
+    /// physical panel intact. Used on warm wake from deep sleep so the
+    /// sleep-screen / wallpaper drawn before sleep stays visible during
+    /// boot until the application replaces it with real content.
+    void setup(PixelResolution resolution, Orientation orientation,
+               bool preserve_panel_image = false);
     void set_pixel_resolution(PixelResolution resolution, bool force = false);
     void set_orientation(Orientation orient);
     inline Orientation get_orientation() { return orientation; }
@@ -202,7 +210,12 @@ class Screen : NonCopyable
 
   public:
     static Screen & get_singleton() noexcept { return singleton; }
-    void setup(PixelResolution resolution, Orientation orientation);
+    /// `preserve_panel_image` is honored on PaperS3 only — Inkplate
+    /// boards always run their normal init path. The parameter has a
+    /// default so existing call sites (orientation change, etc.) need
+    /// no edits.
+    void setup(PixelResolution resolution, Orientation orientation,
+               bool preserve_panel_image = false);
     void set_pixel_resolution(PixelResolution resolution, bool force = false);
     void set_orientation(Orientation orient);
     inline Orientation get_orientation() { return orientation; }
