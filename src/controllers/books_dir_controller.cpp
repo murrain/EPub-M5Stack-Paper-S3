@@ -220,27 +220,32 @@ BooksDirController::enter()
   books_dir_viewer = (viewer_id == LINEAR_VIEWER) ? (BooksDirViewer *) &linear_books_dir_viewer :
                                         (BooksDirViewer *) &matrix_books_dir_viewer;
 
-  // Flush a deferred refresh now: setup() skipped the SD-side
-  // directory scan on warm wake to get the user back to their book
-  // faster, but we owe them an up-to-date listing as soon as they
-  // navigate to the directory. The refresh is naturally one-shot —
-  // subsequent enter() calls in the same session no-op.
-  if (refresh_deferred) {
-    LOG_I("Flushing deferred books-dir refresh");
-    int16_t dummy;
-    if (!books_dir.refresh(nullptr, dummy)) {
-      LOG_E("Deferred books-dir refresh failed");
-    }
-    refresh_deferred = false;
-  }
-
   books_dir_viewer->setup();
   screen.force_full_update();
 
   if (book_was_shown && (last_read_book_index != -1)) {
+    // Warm-wake auto-resume path: jump straight to the user's
+    // book. Do NOT flush the deferred refresh here — that would
+    // run the SD-side directory scan synchronously on the resume
+    // path and defeat the entire point of the deferral. The
+    // refresh fires on the FIRST manual navigation back to the
+    // directory (the else branch below) which is the natural
+    // moment we owe the user a fresh listing.
     show_last_book();
   }
   else {
+    // The user is actually looking at the directory. Flush any
+    // deferred refresh from a warm-wake setup() before drawing
+    // the page so the listing is up to date.
+    if (refresh_deferred) {
+      LOG_I("Flushing deferred books-dir refresh");
+      int16_t dummy;
+      if (!books_dir.refresh(nullptr, dummy)) {
+        LOG_E("Deferred books-dir refresh failed");
+      }
+      refresh_deferred = false;
+    }
+
     if (current_book_index == -1) current_book_index = 0;
     current_book_index = books_dir_viewer->show_page_and_highlight(current_book_index);
   }

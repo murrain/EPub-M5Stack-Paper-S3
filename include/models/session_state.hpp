@@ -77,4 +77,17 @@ namespace SessionState {
 
 }
 
+#else  // !EPUB_INKPLATE_BUILD
+
+// Linux dev build: there is no NVS, no power-cycle deep sleep, and
+// no warm-wake fast path. Provide inline no-op stubs so call sites
+// in shared code (book_controller, fonts, etc.) can use the public
+// API unconditionally without #ifdef churn.
+namespace SessionState {
+  inline void init_at_boot()             {}
+  inline bool is_warm_wake()             { return false; }
+  inline void clear_warm_wake()          {}
+  inline void mark_entering_deep_sleep() {}
+}
+
 #endif // EPUB_INKPLATE_BUILD
