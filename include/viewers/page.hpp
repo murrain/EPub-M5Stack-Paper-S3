@@ -248,7 +248,7 @@ class Page
      * @param str Text to show
      * @param fmt Formatting parameters.
      */
-    void add_text(std::string str, const Format & fmt);
+    void add_text(const std::string & str, const Format & fmt);
 
     /**
      * @brief Put string to the screen.

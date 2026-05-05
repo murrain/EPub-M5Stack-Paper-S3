@@ -984,7 +984,7 @@ Page::add_image(Image & image, const Format & fmt /*, bool at_start_of_page*/)
 }
 
 void
-Page::add_text(std::string str, const Format & fmt)
+Page::add_text(const std::string & str, const Format & fmt)
 {
   Format myfmt = fmt;
 

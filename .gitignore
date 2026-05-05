@@ -31,3 +31,4 @@ valgrind.log
 .DS_Store
 tools/.wallpaper_cache/
 tools/__pycache__/
+.claude/agent-memory/
