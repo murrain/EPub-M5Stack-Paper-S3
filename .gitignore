@@ -29,3 +29,5 @@ SDCard/books/**/*
 !SDCard/books/Austen*.epub
 valgrind.log
 .DS_Store
+tools/.wallpaper_cache/
+tools/__pycache__/

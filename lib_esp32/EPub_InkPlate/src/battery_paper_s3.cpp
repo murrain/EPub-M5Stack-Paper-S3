@@ -68,7 +68,7 @@ bool Battery::setup()
   cali_cfg.atten    = BAT_ADC_ATTEN;
   cali_cfg.bitwidth = BAT_ADC_BITWIDTH;
   if (adc_cali_create_scheme_curve_fitting(&cali_cfg, &cali_handle) != ESP_OK) {
-    LOG_W("Battery: ADC calibration unavailable; using raw->mV approximation");
+    LOG_I("Battery: ADC calibration unavailable; using raw->mV approximation");
     cali_handle = nullptr;
   }
 

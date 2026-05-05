@@ -133,6 +133,13 @@ void Screen::force_full_update()
   s_partial_count = 0;
 }
 
+void Screen::panel_clear()
+{
+  if (!s_epd_initialized) return;
+  epd_hl_set_all_white(&s_hl);
+  epd_fullclear(&s_hl, s_temperature);
+}
+
 void Screen::setup(PixelResolution resolution, Orientation orientation)
 {
   if (!s_epd_initialized) {

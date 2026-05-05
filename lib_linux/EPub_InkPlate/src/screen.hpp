@@ -39,6 +39,7 @@ class Screen : NonCopyable
     void       colorize_region(Dim dim, Pos pos, uint8_t color);
     void                 clear();
     void                update(bool no_full = false); // Parameter only used by the InkPlate version
+    void           panel_clear() {}                  // No-op on Linux (no e-ink panel)
     void                  test();
 
   private:

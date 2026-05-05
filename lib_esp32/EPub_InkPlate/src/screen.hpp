@@ -77,6 +77,10 @@ class Screen : NonCopyable
     inline Orientation get_orientation() { return orientation; }
     inline PixelResolution get_pixel_resolution() { return pixel_resolution; }
     void force_full_update();
+    // Drive the panel through its full-clear waveform and reset the
+    // framebuffer to all-white. Use before sleep-screen rendering to
+    // eliminate residual ghosting from the previous book page.
+    void panel_clear();
 
     inline static uint16_t get_width() { return width; }
     inline static uint16_t get_height() { return height; }

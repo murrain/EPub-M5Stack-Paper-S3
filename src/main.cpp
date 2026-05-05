@@ -72,7 +72,7 @@
 
       #if defined(BOARD_TYPE_PAPER_S3)
         if (!battery.setup()) {
-          LOG_W("Battery monitor setup failed; level reads will return 0.");
+          LOG_E("Battery monitor setup failed; level reads will return 0.");
         }
       #endif
 

@@ -6,6 +6,7 @@
 
 #if EPUB_INKPLATE_BUILD
 
+#include "viewers/wallpaper_viewer.hpp"
 #include "viewers/page.hpp"
 #include "models/epub.hpp"
 #include "models/page_locs.hpp"
@@ -23,15 +24,12 @@
 
 namespace
 {
-  // Margin into which we draw nothing — keeps the layout away from
-  // the screen edge regardless of orientation.
-  constexpr int16_t SIDE_PADDING = 60;
-  constexpr int16_t HORIZ_RULE_THICKNESS = 2;
+  constexpr int16_t PAD     = 52;  // text left/right margin
+  constexpr int16_t F_OUTER = 14;  // outer border inset from screen edge
+  constexpr int16_t F_INNER = 24;  // inner border inset
 
-  Page::Format make_fmt(int8_t font_index,
-                        int16_t font_size,
-                        Fonts::FaceStyle style,
-                        CSS::Align align)
+  Page::Format make_fmt(int8_t font_index, int16_t font_size,
+                        Fonts::FaceStyle style, CSS::Align align)
   {
     Page::Format fmt = {
       .line_height_factor = 1.1,
@@ -42,8 +40,8 @@ namespace
       .margin_right       = 0,
       .margin_top         = 0,
       .margin_bottom      = 0,
-      .screen_left        = SIDE_PADDING,
-      .screen_right       = SIDE_PADDING,
+      .screen_left        = PAD,
+      .screen_right       = PAD,
       .screen_top         = 0,
       .screen_bottom      = 0,
       .width              = 0,
@@ -59,163 +57,284 @@ namespace
     return fmt;
   }
 
-  /// Draw a thin horizontal rule, centered between SIDE_PADDING and
-  /// (Screen::get_width() - SIDE_PADDING). Used as a decorative element.
-  void draw_rule(int16_t y, int16_t inset = 0)
+  // Split `text` at a word boundary near `max_chars`.
+  void word_split(const char * text, std::string & first, std::string & second,
+                  int max_chars = 65)
   {
-    int16_t W = Screen::get_width();
-    int16_t left = SIDE_PADDING + inset;
-    int16_t width = W - 2 * (SIDE_PADDING + inset);
-    if (width <= 0) return;
-    screen.colorize_region(Dim((uint16_t)width, HORIZ_RULE_THICKNESS),
-                           Pos(left, y),
-                           Screen::BLACK_COLOR);
+    size_t len = strlen(text);
+    if ((int)len <= max_chars) { first = text; second = ""; return; }
+    int split = max_chars;
+    while (split > 0 && text[split] != ' ') split--;
+    if (split == 0) split = max_chars;
+    first = std::string(text, (size_t)split);
+    const char * rest = text + split;
+    while (*rest == ' ') rest++;
+    second = rest;
+    if ((int)second.size() > max_chars) {
+      size_t cut = (size_t)max_chars;
+      while (cut > 0 && second[cut] != ' ') cut--;
+      if (cut == 0) cut = (size_t)max_chars;
+      second = second.substr(0, cut) + "...";
+    }
   }
 
-  /// Place a single string centered horizontally at vertical position y
-  /// (where y is the text baseline).
   void put_centered(const std::string & text, int16_t y, Page::Format & fmt)
   {
     fmt.align = CSS::Align::CENTER;
     page.put_str_at(text, Pos(Page::HORIZONTAL_CENTER, y), fmt);
   }
+
+  // Horizontal rule: PAD + inset on each side, optional thickness.
+  void draw_hrule(int16_t W, int16_t y, int16_t inset, int16_t thickness = 1)
+  {
+    int16_t left  = PAD + inset;
+    int16_t width = W - 2*(PAD + inset);
+    if (width <= 0) return;
+    screen.colorize_region(Dim((uint16_t)width, (uint16_t)thickness),
+                           Pos(left, y), Screen::BLACK_COLOR);
+  }
+
+  // 3-px thick outer border built from four filled strips.
+  void draw_outer_frame(int16_t W, int16_t H)
+  {
+    constexpr int16_t T  = 3;
+    int16_t inner_w = W - 2*F_OUTER;
+    int16_t inner_h = H - 2*F_OUTER;
+    screen.colorize_region(Dim(inner_w, T), Pos(F_OUTER, F_OUTER),         Screen::BLACK_COLOR);
+    screen.colorize_region(Dim(inner_w, T), Pos(F_OUTER, H-F_OUTER-T),     Screen::BLACK_COLOR);
+    screen.colorize_region(Dim(T, inner_h), Pos(F_OUTER, F_OUTER),         Screen::BLACK_COLOR);
+    screen.colorize_region(Dim(T, inner_h), Pos(W-F_OUTER-T, F_OUTER),     Screen::BLACK_COLOR);
+  }
+
+  // Dot-grid ornament: COLS×ROWS of 2×2 filled squares on an 8-px pitch.
+  // GH = (ROWS-1)*8 + 2 = 66 px tall for ROWS=9.
+  void draw_dot_grid(int16_t W, int16_t top_y)
+  {
+    constexpr int16_t DOT   = 2;
+    constexpr int16_t PITCH = 8;
+    constexpr int16_t COLS  = 11;
+    constexpr int16_t ROWS  = 9;
+    constexpr int16_t GW    = (COLS - 1)*PITCH + DOT;  // 82 px
+    int16_t gx = (W - GW) / 2;
+    for (int16_t r = 0; r < ROWS; r++) {
+      for (int16_t c = 0; c < COLS; c++) {
+        screen.colorize_region(Dim(DOT, DOT),
+                               Pos(gx + c*PITCH, top_y + r*PITCH),
+                               Screen::BLACK_COLOR);
+      }
+    }
+  }
+}
+
+// Show a battery warning only when charge is critically low.
+// Returns true if a warning was rendered.
+static bool draw_battery_if_critical(int16_t y)
+{
+  #if defined(BOARD_TYPE_PAPER_S3)
+  {
+    int  pct = battery.read_percentage();
+    bool usb = battery.is_usb_powered();
+    if (!usb && pct < 10) {
+      char buf[48];
+      snprintf(buf, sizeof(buf), "Battery critical: %d%% - please charge", pct);
+      Page::Format fmt = make_fmt(1, 8, Fonts::FaceStyle::NORMAL, CSS::Align::CENTER);
+      put_centered(buf, y, fmt);
+      return true;
+    }
+  }
+  #endif
+  return false;
+}
+
+// ── Wallpaper caption strip: title + artist · date ───────────────────────────
+static void draw_wallpaper_caption(int16_t W, int16_t H)
+{
+  constexpr int16_t STRIP_H   = 90;
+  const     int16_t strip_top = H - STRIP_H;    // 870
+
+  screen.colorize_region(Dim((uint16_t)W, (uint16_t)STRIP_H),
+                         Pos(0, strip_top), Screen::WHITE_COLOR);
+  screen.colorize_region(Dim((uint16_t)W, 2), Pos(0, strip_top), Screen::BLACK_COLOR);
+
+  // Title — font size and line count scale with length.
+  // Empirically ~20 chars fits per line at 14pt; ~28 chars at 11pt.
+  int16_t artist_y = strip_top + 55;  // default: single-line title
+  const char * pt = WallpaperViewer::last_title();
+  if (pt && pt[0]) {
+    const int len = (int)strlen(pt);
+    std::string t1, t2;
+    int16_t title_size;
+
+    if (len <= 20) {
+      title_size = 14;
+      t1 = pt;
+    } else if (len <= 40) {
+      title_size = 14;
+      word_split(pt, t1, t2, 20);
+    } else {
+      title_size = 11;
+      t1 = pt;
+    }
+
+    Page::Format fmt = make_fmt(1, title_size, Fonts::FaceStyle::ITALIC, CSS::Align::CENTER);
+    if (t2.empty()) {
+      put_centered(t1, strip_top + 31, fmt);
+    } else {
+      put_centered(t1, strip_top + 22, fmt);
+      put_centered(t2, strip_top + 40, fmt);
+      artist_y = strip_top + 62;
+    }
+  }
+
+  const char * ad = WallpaperViewer::last_artist_date();
+  if (ad && ad[0]) {
+    Page::Format fmt = make_fmt(1, 11, Fonts::FaceStyle::NORMAL, CSS::Align::CENTER);
+    put_centered(ad, artist_y, fmt);
+  }
+
+  draw_battery_if_critical(artist_y + 18);
+}
+
+// ── Geometric-design footer: book progress + battery + wake ──────────────────
+static void draw_geometric_footer(int16_t W, int16_t H)
+{
+  // Rule above footer.
+  draw_hrule(W, H - 174, 0);
+
+  // Book title (italic, 13pt)
+  {
+    const char * raw  = epub.get_title();
+    std::string title = (raw && raw[0]) ? raw : "(no book open)";
+    Page::Format fmt  = make_fmt(1, 13, Fonts::FaceStyle::ITALIC, CSS::Align::CENTER);
+    put_centered(title, H - 148, fmt);
+  }
+
+  // Page progress (normal, 12pt)
+  {
+    char buf[64] = {};
+    int16_t total = page_locs.get_page_count();
+    int16_t curr  = page_locs.get_page_nbr(book_controller.get_current_page_id());
+    if (total > 0 && curr >= 0) {
+      int pct = (int)((curr + 1) * 100 / total);
+      snprintf(buf, sizeof(buf), "Page %d of %d  •  %d%%", (int)(curr+1), (int)total, pct);
+    } else if (curr >= 0) {
+      snprintf(buf, sizeof(buf), "Page %d", (int)(curr + 1));
+    }
+    if (buf[0]) {
+      Page::Format fmt = make_fmt(1, 12, Fonts::FaceStyle::NORMAL, CSS::Align::CENTER);
+      put_centered(buf, H - 126, fmt);
+    }
+  }
+
+  draw_battery_if_critical(H - 90);
 }
 
 void SleepScreenViewer::show()
 {
-  // Don't run while pagination is in flight — the display list belongs
-  // to the layout pass in that case.
+  static constexpr char const * TAG = "SleepScreenViewer";
   if (page.get_compute_mode() == Page::ComputeMode::LOCATION) {
-    LOG_W("SleepScreenViewer::show called during page-locations compute; skipping");
+    LOG_E("SleepScreenViewer::show called during page-locations compute; skipping");
     return;
   }
 
   page.set_compute_mode(Page::ComputeMode::DISPLAY);
 
-  const int16_t W = Screen::get_width();
-  const int16_t H = Screen::get_height();
+  const int16_t W = Screen::get_width();   // 540
+  const int16_t H = Screen::get_height();  // 960
 
-  // White out the canvas. The clear region covers the full screen so
-  // any prior content (book page, menu, dialog) is fully replaced by
-  // the sleep design.
-  Page::Format fmt = make_fmt(/*font_index=*/1, /*font_size=*/12,
-                              Fonts::FaceStyle::NORMAL,
-                              CSS::Align::CENTER);
+  // Full panel clear: drives the e-ink through its clearing waveform and
+  // resets the framebuffer to white. This eliminates book-text ghosting
+  // before the painting is drawn; the subsequent GC16 refresh then lands
+  // on a truly clean panel.
+  screen.panel_clear();
+
+  Page::Format fmt = make_fmt(1, 12, Fonts::FaceStyle::NORMAL, CSS::Align::CENTER);
   page.start(fmt);
-  page.clear_region(Dim((uint16_t)W, (uint16_t)H), Pos(0, 0));
 
-  // Decorative top + bottom rules form a frame around the content.
-  draw_rule(80);
-  draw_rule(H - 100);
+  // ── Try a painting wallpaper first ───────────────────────────────────────
+  bool has_wallpaper = WallpaperViewer::show_random();
 
-  // ──────────────  Header: "Sleeping"  ──────────────
-  {
-    Page::Format header_fmt = make_fmt(1, 36,
-                                       Fonts::FaceStyle::BOLD,
-                                       CSS::Align::CENTER);
-    put_centered("Sleeping", 180, header_fmt);
-  }
+  if (has_wallpaper) {
+    draw_wallpaper_caption(W, H);
+  } else {
+    // ── Geometric lock-screen design ───────────────────────────────────────
 
-  // Decorative ornament under the header.
-  draw_rule(210, /*inset=*/120);
-
-  // ──────────────  Currently reading subhead  ──────────────
-  {
-    Page::Format sub_fmt = make_fmt(1, 14,
-                                    Fonts::FaceStyle::ITALIC,
-                                    CSS::Align::CENTER);
-    put_centered("Currently reading", 280, sub_fmt);
-  }
-
-  // ──────────────  Book title  ──────────────
-  {
-    const char * raw_title = epub.get_title();
-    std::string  title     = (raw_title != nullptr && raw_title[0] != '\0')
-                               ? std::string(raw_title)
-                               : std::string("(no book open)");
-
-    Page::Format title_fmt = make_fmt(1, 24,
-                                      Fonts::FaceStyle::NORMAL,
-                                      CSS::Align::CENTER);
-    // Use put_str_at for absolute placement; long titles will get
-    // truncated by the screen edge (acceptable for v1).
-    put_centered(title, 340, title_fmt);
-  }
-
-  // ──────────────  Reading progress  ──────────────
-  {
-    char buf[64] = {};
-    int16_t total = page_locs.get_page_count();
-    int16_t curr  = page_locs.get_page_nbr(book_controller.get_current_page_id());
-
-    if (total > 0 && curr >= 0) {
-      int pct = (int)((curr + 1) * 100 / total);
-      snprintf(buf, sizeof(buf), "Page %d of %d  •  %d%%",
-               (int)(curr + 1), (int)total, pct);
-    } else if (curr >= 0) {
-      snprintf(buf, sizeof(buf), "Page %d", (int)(curr + 1));
-    } else {
-      buf[0] = '\0';
+    // Picture-frame border: 3-px outer + 1-px inner + corner squares.
+    draw_outer_frame(W, H);
+    screen.draw_rectangle(Dim(W - 2*F_INNER, H - 2*F_INNER),
+                          Pos(F_INNER, F_INNER), Screen::BLACK_COLOR);
+    {
+      constexpr int16_t CS = 8;
+      constexpr int16_t CO = F_INNER - CS/2;
+      screen.colorize_region(Dim(CS, CS), Pos(CO,      CO      ), Screen::BLACK_COLOR);
+      screen.colorize_region(Dim(CS, CS), Pos(W-CO-CS, CO      ), Screen::BLACK_COLOR);
+      screen.colorize_region(Dim(CS, CS), Pos(CO,      H-CO-CS ), Screen::BLACK_COLOR);
+      screen.colorize_region(Dim(CS, CS), Pos(W-CO-CS, H-CO-CS ), Screen::BLACK_COLOR);
     }
 
-    if (buf[0] != '\0') {
-      Page::Format prog_fmt = make_fmt(1, 13,
-                                       Fonts::FaceStyle::NORMAL,
-                                       CSS::Align::CENTER);
-      put_centered(buf, 410, prog_fmt);
+    // Top dot-grid ornament  (y 48–114, GH = 8*8+2 = 66 px).
+    draw_dot_grid(W, 48);
 
-      // Progress bar under the text.
+    // "currently reading" subhead.
+    {
+      Page::Format sub_fmt = make_fmt(1, 14, Fonts::FaceStyle::ITALIC, CSS::Align::CENTER);
+      put_centered("currently reading", 162, sub_fmt);
+    }
+    draw_hrule(W, 178, 0);
+
+    // Book title — hero element.
+    {
+      const char * raw  = epub.get_title();
+      std::string title = (raw && raw[0]) ? raw : "(no book open)";
+      Page::Format title_fmt = make_fmt(1, 32, Fonts::FaceStyle::BOLD, CSS::Align::CENTER);
+      put_centered(title, 252, title_fmt);
+    }
+
+    // Double-rule ornament below title.
+    draw_hrule(W, 285, 80);
+    draw_hrule(W, 292, 80);
+
+    // Reading progress: text + bar with quarter-tick marks.
+    {
+      char buf[64] = {};
+      int16_t total = page_locs.get_page_count();
+      int16_t curr  = page_locs.get_page_nbr(book_controller.get_current_page_id());
+
       if (total > 0 && curr >= 0) {
-        int16_t bar_width  = W - 2 * (SIDE_PADDING + 60);
-        int16_t bar_x      = SIDE_PADDING + 60;
-        int16_t bar_y      = 430;
-        int16_t bar_height = 8;
-        // Outline.
-        screen.draw_rectangle(Dim((uint16_t)bar_width, (uint16_t)bar_height),
-                              Pos(bar_x, bar_y),
-                              Screen::BLACK_COLOR);
-        // Fill.
-        int16_t fill_w = (int16_t)((int32_t)bar_width * (curr + 1) / total);
-        if (fill_w > 0) {
-          screen.colorize_region(Dim((uint16_t)fill_w, (uint16_t)bar_height),
-                                 Pos(bar_x, bar_y),
-                                 Screen::BLACK_COLOR);
+        int pct = (int)((curr + 1) * 100 / total);
+        snprintf(buf, sizeof(buf), "Page %d of %d  •  %d%%", (int)(curr+1), (int)total, pct);
+      } else if (curr >= 0) {
+        snprintf(buf, sizeof(buf), "Page %d", (int)(curr + 1));
+      }
+
+      if (buf[0]) {
+        Page::Format prog_fmt = make_fmt(1, 13, Fonts::FaceStyle::NORMAL, CSS::Align::CENTER);
+        put_centered(buf, 328, prog_fmt);
+
+        if (total > 0 && curr >= 0) {
+          int16_t bar_x = PAD + 40;
+          int16_t bar_w = W - 2*(PAD + 40);
+          int16_t bar_y = 348;
+          int16_t bar_h = 10;
+          screen.draw_rectangle(Dim(bar_w, bar_h), Pos(bar_x, bar_y), Screen::BLACK_COLOR);
+          int16_t fill_w = (int16_t)((int32_t)bar_w * (curr + 1) / total);
+          if (fill_w > 0)
+            screen.colorize_region(Dim(fill_w, bar_h), Pos(bar_x, bar_y), Screen::BLACK_COLOR);
+          for (int q = 1; q <= 3; q++) {
+            int16_t tx = bar_x + (int16_t)((int32_t)bar_w * q / 4);
+            screen.colorize_region(Dim(1, bar_h - 4), Pos(tx, bar_y + 2), Screen::WHITE_COLOR);
+          }
         }
       }
     }
+
+    // Bottom dot-grid ornament (y 720–786).
+    draw_dot_grid(W, 720);
+
+    draw_geometric_footer(W, H);
   }
 
-  // ──────────────  Wake instructions  ──────────────
-  {
-    Page::Format wake_fmt = make_fmt(1, 14,
-                                     Fonts::FaceStyle::NORMAL,
-                                     CSS::Align::CENTER);
-    put_centered("Press the side button to wake", H - 200, wake_fmt);
-  }
-
-  // ──────────────  Battery indicator (PaperS3 only)  ──────────────
-  #if defined(BOARD_TYPE_PAPER_S3)
-  {
-    char buf[32];
-    int pct  = battery.read_percentage();
-    float v  = battery.read_level();
-    bool  usb = battery.is_usb_powered();
-    if (v > 0.0f) {
-      snprintf(buf, sizeof(buf), "Battery %d%%  (%.2fV)%s",
-               pct, v, usb ? "  ⚡" : "");
-    } else {
-      snprintf(buf, sizeof(buf), "Battery: --");
-    }
-    Page::Format bat_fmt = make_fmt(1, 11,
-                                    Fonts::FaceStyle::NORMAL,
-                                    CSS::Align::CENTER);
-    put_centered(buf, H - 130, bat_fmt);
-  }
-  #endif
-
-  // Force a full GC16 refresh so the panel is in a clean state for the
-  // long retention period. A partial waveform would leave residual
-  // ghosting that becomes more visible after hours / days asleep.
+  // Full GC16 refresh — clean panel for the long retention period.
   screen.force_full_update();
   page.paint(false);
 }
