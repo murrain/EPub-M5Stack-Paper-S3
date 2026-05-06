@@ -16,6 +16,8 @@
 
 namespace
 {
+  static constexpr char const * TAG = "UsbMscViewer";
+
   constexpr int16_t PAD = 52;
 
   Page::Format make_fmt(int8_t font_index, int16_t font_size,

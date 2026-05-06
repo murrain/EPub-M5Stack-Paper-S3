@@ -19,3 +19,4 @@
 #endif
 
 #define LOG_E(fmt, ...) { log('E', TAG, fmt, ##__VA_ARGS__); }
+#define LOG_W(fmt, ...) { log('W', TAG, fmt, ##__VA_ARGS__); }
