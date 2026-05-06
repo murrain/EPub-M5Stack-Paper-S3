@@ -148,11 +148,24 @@ class PageLocs
 
     bool insert(PageId & id, PageInfo & info);
 
-    inline void clear() { 
+    inline void clear() {
       std::scoped_lock guard(mutex);
-      pages_map.clear(); 
+      pages_map.clear();
       items_set.clear();
-      completed = false; 
+      completed = false;
+      // Deep-clean item_info too. The previous version left
+      // item_info.xml_doc, css_cache, css_list, css, and data
+      // resident across stop_document → start_new_document
+      // transitions. The next get_item_at_index would eventually
+      // free them via clear_item_data, BUT only if a build
+      // actually started. On format-param aborts mid-build, on
+      // back-to-list-then-deep-sleep flows, or on close_file
+      // paths that don't trigger a new build, those allocations
+      // hung around indefinitely — one item's worth of pugixml
+      // DOM + CSS suite + raw data per stale exit. Across
+      // sequential book opens this compounded into the heap-
+      // exhaustion crash the user reported.
+      epub.clear_item_data(item_info);
     }
 
     inline int16_t get_page_count() { return completed ? page_count : -1; }

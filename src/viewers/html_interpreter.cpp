@@ -35,8 +35,8 @@ MemoryPool<Page::Format> HTMLInterpreter::fmt_pool;
 // block to be displayed (paragraphs, headers, etc.)
 
 bool
-HTMLInterpreter::build_pages_recurse(xml_node       node, 
-                                     Page::Format & fmt, 
+HTMLInterpreter::build_pages_recurse(xml_node       node,
+                                     Page::Format & fmt,
                                      DOM::Node    * dom_node,
                                      int16_t        level)
 {
@@ -49,6 +49,14 @@ HTMLInterpreter::build_pages_recurse(xml_node       node,
 
   if (node == nullptr) return false;
   if (at_end()) return true;
+
+  // Check abort at recursion entry — long DOM trees would otherwise
+  // descend into many sibling subtrees before page_end fires its
+  // cooperative_check. PageLocsInterp returns true here when STOP
+  // arrives; BookViewerInterp's no-op default returns false. The
+  // call returns false up the chain, reaching build_page_locs's
+  // `if (!build_pages_recurse(...)) break;` which exits cleanly.
+  if (should_abort_inner()) return false;
     
   check_if_started();
 
@@ -374,7 +382,18 @@ HTMLInterpreter::build_pages_recurse(xml_node       node,
 
       bool to_be_started = !check_if_started();
 
+      // Periodic in-loop abort check. Every 64 characters is fine-
+      // grained enough to keep STOP latency under ~10 ms even on
+      // dense text, while the per-iteration cost (1 increment + 1
+      // mask + 1 virtual call returning a bool) is negligible
+      // compared to the layout work each iteration already does.
+      uint16_t abort_counter = 0;
+
       while (*str) {
+
+        if ((++abort_counter & 0x3F) == 0) {
+          if (should_abort_inner()) return false;
+        }
 
         if (uint8_t(*str) <= ' ') {
           if (check_if_started()) {

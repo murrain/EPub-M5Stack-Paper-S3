@@ -9,7 +9,9 @@
 #include "controllers/book_controller.hpp"
 #include "models/books_dir.hpp"
 #include "models/config.hpp"
+#include "models/epub.hpp"
 #include "models/nvs_mgr.hpp"
+#include "models/page_locs.hpp"
 #include "models/session_state.hpp"
 #include "viewers/book_viewer.hpp"
 #include "viewers/linear_books_dir_viewer.hpp"
@@ -206,11 +208,35 @@ BooksDirController::show_last_book()
   }
 }
 
-void 
+void
 BooksDirController::enter()
 {
 
   LOG_D("===> enter()...");
+
+  // Tear down any previously-active book before rendering the dir.
+  // BooksDirController is the natural close point for a book session
+  // — symmetric with how books get OPENED from here via show_last_book
+  // and the user-tap handlers that call book_controller.open_book_file.
+  // Putting the close here (rather than in BookController::leave)
+  // avoids breaking BOOK→PARAM and BOOK→TOC transitions, both of which
+  // run leave() but expect the file to remain open.
+  //
+  // Safe on first cold-boot enter: file_is_open is false, close_file
+  // short-circuits. Safe on warm-wake auto-resume (book_was_shown
+  // path below): close_file no-ops, then show_last_book → open_book_
+  // file → epub.open_file does its own internal close-then-open
+  // anyway.
+  //
+  // page_locs.stop_document() must precede close_file so the
+  // RetrieverTask isn't mid-build when EPub state goes away (which
+  // would page-fault on item_info.xml_doc dereferences). The new
+  // stop_document also deep-cleans PageLocs::item_info, which would
+  // otherwise hold dangling css_list pointers into the now-freed
+  // EPub::css_cache.
+  page_locs.stop_document();
+  epub.close_file();
+
   config.get(Config::Ident::DIR_VIEW, &viewer_id);
   const char *view = (viewer_id == LINEAR_VIEWER) ? "linear" :
                      (viewer_id == MATRIX_VIEWER) ? "matrix" : "unknown";

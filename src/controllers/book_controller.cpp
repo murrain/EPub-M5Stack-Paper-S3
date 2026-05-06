@@ -48,6 +48,16 @@ BookController::enter()
 {
   LOG_D("===> Enter()...");
 
+  #if DEBUGGING && EPUB_INKPLATE_BUILD
+    // Heap watermark on every book enter. Lets a maintainer verify
+    // the sequential-load leak fix on a regression-test repro: open
+    // book A, back to dir, open book B, etc., and watch that the
+    // free / largest-block numbers return to baseline between books.
+    // Anything growing monotonically across enters is a regression.
+    // Gated on DEBUGGING so release builds don't pay the LOG_I cost.
+    ESP::show_internal_heap_info("BookController::enter");
+  #endif
+
   page_locs.check_for_format_changes(epub.get_item_count(), current_page_id.itemref_index);
   const PageLocs::PageId * id = page_locs.get_page_id(current_page_id);
   if (id != nullptr) {
@@ -61,11 +71,27 @@ BookController::enter()
   show_and_capture(current_page_id);
 }
 
-void 
+void
 BookController::leave(bool going_to_deep_sleep)
 {
   LOG_D("===> leave()...");
-  
+
+  // Teardown of the active book (page_locs.stop_document +
+  // epub.close_file) is NOT done here. AppController::launch calls
+  // leave() on every transition out of BOOK including BOOK→PARAM
+  // (book parameters editing) and BOOK→TOC, both of which expect
+  // the file to remain open — BookParamController reads epub.get_
+  // book_params and get_book_format_params, TocController calls
+  // epub.retrieve_file for the NCX. Closing the file on those
+  // transitions and not reopening it on PARAM/TOC→BOOK return
+  // would silently break those flows.
+  //
+  // Instead, the teardown lives in BooksDirController::enter,
+  // which is the natural exit point of a book session — symmetric
+  // with how BooksDirController is also where books get opened.
+  // The deep-sleep path doesn't transition through DIR; it stops
+  // the retriever directly in app_controller.going_to_deep_sleep
+  // and lets the PMU power-cut reclaim the rest.
   books_dir_controller.save_last_book(current_page_id, going_to_deep_sleep);
 }
 
