@@ -36,7 +36,9 @@ class BookParamController : public MenuControllerBase
 
   protected:
     bool has_active_sub_state() const override;
-    void dispatch_to_sub_state(const EventMgr::Event & event) override;
+    void dispatch_to_sub_state(
+      const EventMgr::Event & event,
+      bool                    skip_strip_refresh = false) override;
 };
 
 #if __BOOK_PARAM_CONTROLLER__
