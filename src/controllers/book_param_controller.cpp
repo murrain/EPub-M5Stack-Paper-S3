@@ -398,6 +398,15 @@ BookParamController::dispatch_to_sub_state(
             unlink(filepath.c_str());
           }
 
+          // Synchronous refresh after a book delete is intentional:
+          // force_init=false means refresh() only walks the
+          // existing DB to drop the deleted entry's record (no
+          // EPUB metadata extraction, no cover decoding). The
+          // operation completes in <100ms typically. The async
+          // path that CommonActions::refresh_books_dir uses is
+          // designed for force_init=true full rescans where
+          // USB starvation matters; this short post-delete
+          // rescan doesn't justify the worker-pthread overhead.
           int16_t dummy;
           books_dir.refresh(nullptr, dummy, false);
 

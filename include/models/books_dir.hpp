@@ -7,6 +7,8 @@
 
 #include "models/epub.hpp"
 
+#include <atomic>
+#include <thread>
 #include <vector>
 #include <map>
 #include <iostream>
@@ -66,6 +68,31 @@ class BooksDir
     #pragma pack(pop)
 
   private:
+    // Async refresh state — see public start_async_refresh /
+    // poll_async_refresh for the contract. atomic<bool> is enough
+    // for the flags (single writer per flag, simple value type).
+    // The result and the thread handle are only accessed by the
+    // caller (in main task) AFTER atomic_done has been observed
+    // true, so no protection is needed beyond the publish.
+    //
+    // Single-producer assumption: only one task (the main app
+    // task) ever calls start_async_refresh / poll_async_refresh.
+    // The active_ flag's load-then-store sequence inside
+    // start_async_refresh is therefore race-free as written. If
+    // a future call site adds a second producer, that call must
+    // serialize externally — atomic_compare_exchange on active_
+    // would be the upgrade.
+    //
+    // done_ is sticky after a refresh completes (stays true
+    // until the next start_async_refresh resets it). Subsequent
+    // poll calls return true without doing anything; the join
+    // is a no-op because the thread handle has already been
+    // joined and is non-joinable.
+    std::thread       async_refresh_thread_;
+    std::atomic<bool> async_refresh_active_{false};
+    std::atomic<bool> async_refresh_done_{false};
+    bool              async_refresh_result_{false};
+
     static constexpr char const * TAG            = "BooksDir";
     static constexpr char const * BOOKS_DIR_FILE = MAIN_FOLDER "/books_dir.db";
     static constexpr char const * NEW_DIR_FILE   = MAIN_FOLDER "/new_dir.db";
@@ -86,8 +113,18 @@ class BooksDir
   public:
     BooksDir() : current_book_idx(-1) { }
    ~BooksDir() {
+      // Join any in-flight async refresh BEFORE touching the db.
+      // The worker pthread may still be inside refresh() reading
+      // / writing the db; abandoning the thread (joinable on
+      // destruction) would call std::terminate, and tearing down
+      // the db while the worker dereferences it would UAF. On a
+      // clean shutdown poll_async_refresh has already joined and
+      // this is a no-op; on abnormal termination (esp_restart
+      // mid-scan, ISR-triggered reset, etc.) it's the last
+      // chance to bring the worker home cleanly.
+      if (async_refresh_thread_.joinable()) async_refresh_thread_.join();
       sorted_index.clear();
-      close_db(); 
+      close_db();
     }
 
     /**
@@ -183,11 +220,46 @@ class BooksDir
 
     /**
      * @brief Close the SimpleDB database
-     * 
+     *
      */
     void close_db() { db.close(); }
 
     void show_db();
+
+    // ──────────────────────────────────────────────────────────────
+    // Async refresh
+    //
+    // refresh() above is synchronous and can run for tens of seconds
+    // when force_init=true on a sizeable library: each EPUB is opened,
+    // its OPF / metadata XML is parsed, the cover is decoded and
+    // rescaled, and a database record is built. Running this on the
+    // main task starves TinyUSB (which on PaperS3 shares the app
+    // pthread for some of its housekeeping) and freezes the UI for
+    // the duration of the scan — visible as USB drops and "device
+    // hung."
+    //
+    // The async flow runs the same work on a worker pthread (PSRAM
+    // stack via esp_pthread_cfg) and lets the caller block in a
+    // vTaskDelay-yielding loop instead. The scheduler runs TinyUSB
+    // and panel-paint tasks on the main pthread's empty time slices,
+    // so USB stays alive and the panel-painted "Refreshing..." banner
+    // is visible the whole time.
+    //
+    // Contract:
+    //   1. Caller calls start_async_refresh(force_init). Returns
+    //      false only if a refresh is already in progress (caller
+    //      must serialize itself; we don't queue requests).
+    //   2. Caller polls poll_async_refresh() in a loop with a small
+    //      yielding delay. Returns true once the worker has exited;
+    //      caller MUST stop polling after that (subsequent calls
+    //      will return true forever until the next start).
+    //   3. After poll returns true, async_refresh_result() reports
+    //      whether the underlying refresh() succeeded.
+    //   4. Caller is responsible for any UI repaint after.
+    bool start_async_refresh(bool force_init);
+    bool         poll_async_refresh();
+    bool       async_refresh_result() const { return async_refresh_result_; }
+    bool       async_refresh_active() const { return async_refresh_active_; }
 };
 
 #if __BOOKS_DIR__

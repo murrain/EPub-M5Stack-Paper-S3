@@ -16,6 +16,18 @@
 #include "models/session_state.hpp"
 
 #if EPUB_INKPLATE_BUILD
+  // Async refresh poll loop uses vTaskDelay to yield to TinyUSB
+  // and panel-paint tasks while the worker pthread runs the
+  // SD scan.
+  #include <freertos/FreeRTOS.h>
+  #include <freertos/task.h>
+#else
+  // Linux build: std::this_thread::sleep_for instead.
+  #include <chrono>
+  #include <thread>
+#endif
+
+#if EPUB_INKPLATE_BUILD
   #include "inkplate_platform.hpp"
   #include "esp.hpp"
 #endif
@@ -35,25 +47,57 @@ CommonActions::show_last_book()
 void
 CommonActions::refresh_books_dir()
 {
-  int16_t temp;
+  // Asynchronous refresh — worker pthread does the SD scan and
+  // metadata extraction, main task blocks here in a yielding
+  // poll loop. With the synchronous refresh that lived here
+  // before, a multi-book scan starved TinyUSB (USB host dropped
+  // the device after ~16 s) and froze the UI. The async pattern
+  // gives the scheduler explicit yield slots so TinyUSB and the
+  // panel-paint pthreads keep running while the worker grinds
+  // through EPUBs.
+  //
+  // The msg_viewer banner painted earlier (inside the refresh
+  // function on first new-book detection) stays visible through
+  // the entire scan — no per-book progress updates because each
+  // would cost a ~700 ms full-panel paint cycle and the banner
+  // alone is enough to tell the user "device is working." A
+  // future iteration could add a small progress region update
+  // (page.paint_region with a counter / current filename) if
+  // the static banner feels too quiet.
+  if (!books_dir.start_async_refresh(true)) {
+    // Already in progress — caller raced with itself somehow;
+    // log and bail. UI state is whatever the prior refresh left.
+    LOG_W("refresh_books_dir: refresh already in progress");
+    return;
+  }
 
-  books_dir.refresh(nullptr, temp, true);
+  while (!books_dir.poll_async_refresh()) {
+    // Yield 100 ms per spin. TinyUSB needs to service its host
+    // ~every second; 100 ms is comfortably within that window.
+    // The worker isn't doing the polling — it's doing actual
+    // work — so the delay is purely "main task gives the
+    // scheduler room to run other tasks."
+    #if EPUB_INKPLATE_BUILD
+      vTaskDelay(pdMS_TO_TICKS(100));
+    #else
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    #endif
+  }
+
+  // refresh() return value is captured but currently unused. If
+  // a future caller needs to react to a failed refresh
+  // (corrupt SD, OOM, etc), it can read books_dir.async_refresh
+  // _result(). For now the LOG_E inside refresh is the only
+  // surface for the failure case.
 
   #if (INKPLATE_6PLUS || TOUCH_TRIAL)
-    // Touch builds with the persistent strip: this action was
-    // dispatched from inside BooksDirController::input_event,
-    // so we never left DIR. set_controller(DIR) would be a
-    // no-op and DIR.enter wouldn't fire — the now-refreshed
-    // books list never gets redrawn and msg_viewer's
-    // "Refreshing..." banner sits on screen. Re-render in
-    // place via the dedicated refresh_view path.
-    //
-    // Drain any input events the user fired during the long
-    // synchronous SD scan (they may have tapped "TAP to
-    // continue" repeatedly thinking nothing was happening).
+    // Drain any input events the user fired during the scan.
     // Without this drain, the queued taps would dispatch
     // immediately after refresh_view repaints, opening books
-    // or menu items the user never meant to tap.
+    // or menu items the user never meant to tap. See
+    // books_dir_controller.cpp::refresh_view for the in-place
+    // redraw path that replaces the OPTION→DIR transition the
+    // synchronous flow used to rely on.
     {
       EventMgr::Event drained = event_mgr.coalesce_pending_input();
       (void) drained;  // discard — we don't want to honor
