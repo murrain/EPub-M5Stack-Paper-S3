@@ -127,6 +127,12 @@ class PageLocs
     void abort_threads();
     bool build_page_locs(int16_t itemref_index);
 
+    // Fast read of the StateTask abort flag, intended for use inside
+    // tight inner loops of HTMLInterpreter::build_pages_recurse. Just
+    // a flag fetch — no yield, no logging, no mutex. Called frequently
+    // to keep abort latency low (sub-100 ms even on long pages).
+    bool is_aborting() const;
+
     const PageId * get_next_page_id(const PageId & page_id, int16_t count = 1);
     const PageId * get_prev_page_id(const PageId & page_id, int     count = 1);
     const PageId *      get_page_id(const PageId & page_id                   );
@@ -148,11 +154,24 @@ class PageLocs
 
     bool insert(PageId & id, PageInfo & info);
 
-    inline void clear() { 
+    inline void clear() {
       std::scoped_lock guard(mutex);
-      pages_map.clear(); 
+      pages_map.clear();
       items_set.clear();
-      completed = false; 
+      completed = false;
+      // Deep-clean item_info too. The previous version left
+      // item_info.xml_doc, css_cache, css_list, css, and data
+      // resident across stop_document → start_new_document
+      // transitions. The next get_item_at_index would eventually
+      // free them via clear_item_data, BUT only if a build
+      // actually started. On format-param aborts mid-build, on
+      // back-to-list-then-deep-sleep flows, or on close_file
+      // paths that don't trigger a new build, those allocations
+      // hung around indefinitely — one item's worth of pugixml
+      // DOM + CSS suite + raw data per stale exit. Across
+      // sequential book opens this compounded into the heap-
+      // exhaustion crash the user reported.
+      epub.clear_item_data(item_info);
     }
 
     inline int16_t get_page_count() { return completed ? page_count : -1; }

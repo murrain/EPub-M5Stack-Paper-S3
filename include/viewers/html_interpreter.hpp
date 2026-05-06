@@ -57,6 +57,17 @@ class HTMLInterpreter
     // and the page location computation processes.
     virtual bool page_end(const Page::Format & fmt) = 0;
 
+    // Inner-loop abort check called from the character/word loops in
+    // build_pages_recurse. Default returns false (BookViewerInterp
+    // never aborts mid-render — the user explicitly requested the
+    // page). PageLocsInterp overrides to forward to PageLocs::is_
+    // aborting so a stop_document() call mid-build doesn't have to
+    // wait until the next page_end to take effect — long items
+    // (chapter pages with thousands of words) used to block STOP
+    // for hundreds of ms while build_pages_recurse ran to the next
+    // page boundary.
+    virtual bool should_abort_inner() const { return false; }
+
   public:
     HTMLInterpreter(Page & the_page, DOM & the_dom, Page::ComputeMode the_comp_mode, const EPub::ItemInfo & the_item) 
       :           page(the_page), 

@@ -61,12 +61,39 @@ BookController::enter()
   show_and_capture(current_page_id);
 }
 
-void 
+void
 BookController::leave(bool going_to_deep_sleep)
 {
   LOG_D("===> leave()...");
-  
+
   books_dir_controller.save_last_book(current_page_id, going_to_deep_sleep);
+
+  if (!going_to_deep_sleep) {
+    // Regular navigation back to dir/options/etc. Tear down the
+    // active book to free heap. Without this, the previous book's
+    // OPF buffer, encryption buffer, EPub::css_cache, fonts loaded
+    // for the book, and PageLocs::item_info's resident pugixml DOM
+    // + CSS suite + raw data all stayed pinned until the user
+    // happened to open another book — at which point epub.open_file
+    // would call close_file as a side-effect. With sequential book
+    // opens (read book A, back to dir, open book B, repeat) the
+    // cleanup window kept narrowing as the next book's allocations
+    // had to fit alongside the previous one's still-resident state,
+    // eventually exhausting internal SRAM contig blocks.
+    //
+    // page_locs.stop_document() must come before close_file: the
+    // RetrieverTask may be mid-build when the user hits "back",
+    // and we need it idle before we yank the EPub state from
+    // under it (otherwise it page-faults on item_info's freed
+    // xml_doc on the next iteration).
+    //
+    // Skipped on going_to_deep_sleep=true because the SleepScreen
+    // viewer that paints during the sleep-entry window needs fonts
+    // alive (close_file calls fonts.clear). The PMU power-cut
+    // releases everything anyway when sleep actually fires.
+    page_locs.stop_document();
+    epub.close_file();
+  }
 }
 
 bool

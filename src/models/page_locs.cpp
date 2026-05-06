@@ -17,6 +17,7 @@
 #include <iostream>
 #include <fstream>
 #include <ios>
+#include <memory>
 
 enum class MgrReq : int8_t { ASAP_READY, STOPPED };
 
@@ -585,11 +586,16 @@ static inline bool cooperative_check() {
 class PageLocsInterp : public HTMLInterpreter
 {
   public:
-    PageLocsInterp(Page & the_page, DOM & the_dom, Page::ComputeMode the_comp_mode, const EPub::ItemInfo & the_item) : 
+    PageLocsInterp(Page & the_page, DOM & the_dom, Page::ComputeMode the_comp_mode, const EPub::ItemInfo & the_item) :
       HTMLInterpreter(the_page, the_dom, the_comp_mode, the_item) {}
     ~PageLocsInterp() {}
-    
+
     void doc_end(const Page::Format & fmt) { page_end(fmt); }
+
+    // Hot-path abort check for inner build_pages_recurse loops. No
+    // yield, no logging — just the flag fetch — because this is
+    // called every ~64 characters and the cost compounds.
+    bool should_abort_inner() const override { return state_task.is_aborting(); }
 
   protected:
     bool page_end(const Page::Format & fmt) {
@@ -715,18 +721,28 @@ PageLocs::build_page_locs(int16_t itemref_index)
       .display            = CSS::Display::INLINE
     };
 
-    DOM            * dom    = new DOM;
-    PageLocsInterp * interp = new PageLocsInterp(page_out, 
-                                                 *dom, 
-                                                 Page::ComputeMode::LOCATION, 
-                                                 item_info);
+    // RAII for the DOM and the PageLocsInterp so they get freed on
+    // every return path — including stop_document mid-build, an
+    // exception thrown from deep inside build_pages_recurse (pugixml
+    // I/O, std::bad_alloc), or any future early-return added below.
+    // The previous raw new/delete pattern leaked both allocations on
+    // any path that didn't reach the explicit deletes at the end of
+    // the function. Confirmed by inspection: with sequential book
+    // loads + format-change aborts the leak compounded across loads,
+    // matching the user-reported "device crashes after several books
+    // are opened in sequence" symptom.
+    auto dom    = std::make_unique<DOM>();
+    auto interp = std::make_unique<PageLocsInterp>(page_out,
+                                                   *dom,
+                                                   Page::ComputeMode::LOCATION,
+                                                   item_info);
 
     #if DEBUGGING_AID
       interp->set_pages_to_show_state(PAGE_FROM, PAGE_TO);
       interp->check_page_to_show(pages_map.size());
     #endif
 
-    interp->set_limits(0, 
+    interp->set_limits(0,
                        9999999,
                        current_format_params.show_images == 1);
 
@@ -767,12 +783,8 @@ PageLocs::build_page_locs(int16_t itemref_index)
       done = true;
     }
 
-    //dom->show();
-    delete dom;
-    dom = nullptr;
-
-    delete interp;
-    interp = nullptr;
+    // unique_ptr destructors fire here — dom and interp freed on every
+    // path out of the if-block, including the loop break above.
   }
 
   //page_out.set_compute_mode(Page::ComputeMode::DISPLAY);
@@ -809,6 +821,16 @@ PageLocs::retrieve_asap(int16_t itemref_index)
   return true;
 }
 
+bool
+PageLocs::is_aborting() const
+{
+  // Forwards to the StateTask flag because state_task is a static
+  // inside this TU. Used by HTMLInterpreter inner loops via the
+  // PageLocsInterp::should_abort_inner override; see html_interpreter
+  // build_pages_recurse character loop for the call site.
+  return state_task.is_aborting();
+}
+
 void
 PageLocs::stop_document()
 {
@@ -826,6 +848,20 @@ PageLocs::stop_document()
   LOG_D("==> Waiting for STOPPED... <==");
   QUEUE_RECEIVE(mgr_queue, mgr_queue_data, portMAX_DELAY);
   LOG_D("-> %s <-", (mgr_queue_data.req == MgrReq::STOPPED) ? "STOPPED" : "ERROR!!!");
+
+  // Retriever is now confirmed idle; safe to free the per-item state
+  // it was working on. Without this, item_info.xml_doc + css_cache +
+  // css_list + data + css all hung around until the next get_item_at_
+  // index, which may never come (user navigated to dir and stayed,
+  // or sleep entry on a non-resume path). On format-change aborts
+  // the css_list pointers also went stale because their backing
+  // entries in EPub::css_cache were freed by close_file.
+  //
+  // Held under the same mutex as clear() to keep the invariant
+  // "item_info is either valid-current-item OR fully-zeroed,
+  // never partially-cleaned-while-someone-is-reading".
+  std::scoped_lock guard(mutex);
+  epub.clear_item_data(item_info);
 }
 
 void 
