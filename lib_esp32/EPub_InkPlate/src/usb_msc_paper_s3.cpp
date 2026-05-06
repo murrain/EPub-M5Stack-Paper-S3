@@ -12,6 +12,7 @@
 #include "esp_err.h"
 #include "esp_system.h"
 #include "tinyusb.h"
+#include "tinyusb_default_config.h"
 #include "tinyusb_msc.h"
 
 namespace
@@ -98,6 +99,14 @@ bool UsbMsc::start()
   // Default descriptors come from the Kconfig values
   // (CONFIG_TINYUSB_DESC_*) set in sdkconfig.paper_s3.
   //
+  // tinyusb_config_t.task MUST be populated with non-zero stack
+  // size or tinyusb_driver_install rejects the config with
+  // ESP_ERR_INVALID_ARG ("Task size can't be 0"). Zero-init via
+  // {} doesn't work — there's no implicit default. We use the
+  // component's own DEFAULT-task macro so we pick up whatever
+  // size/priority/affinity Kconfig recommends rather than baking
+  // arbitrary numbers in here.
+  //
   // Note on partial-init rollback: on driver_install failure we
   // tear down the MSC storage but do NOT call
   // tinyusb_msc_set_storage_mount_point(MOUNT_APP) to restore
@@ -107,6 +116,7 @@ bool UsbMsc::start()
   // which is acceptable because the alert message_viewer instructs
   // the user to power-cycle on failure (see option_controller).
   tinyusb_config_t tusb_cfg = {};
+  tusb_cfg.task = TINYUSB_TASK_DEFAULT();
   ret = tinyusb_driver_install(&tusb_cfg);
   if (ret != ESP_OK) {
     LOG_E("tinyusb_driver_install failed (%s)", esp_err_to_name(ret));
