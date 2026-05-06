@@ -290,42 +290,42 @@ BookParamController::dispatch_to_sub_state(const EventMgr::Event & event)
   if (book_params_form_is_shown) {
     if (form_viewer.event(event)) {
       book_params_form_is_shown = false;
-      // if (ok) {
-        BookParams * book_params = epub.get_book_params();
 
-        if (show_images       !=       old_show_images) book_params->put(BookParams::Ident::SHOW_IMAGES,        show_images      );
-        if (font_size         !=         old_font_size) book_params->put(BookParams::Ident::FONT_SIZE,          font_size        );
-        if (font              !=              old_font) book_params->put(BookParams::Ident::FONT,               font             );
-        if (use_fonts_in_book != old_use_fonts_in_book) book_params->put(BookParams::Ident::USE_FONTS_IN_BOOK,  use_fonts_in_book);
+      BookParams * book_params = epub.get_book_params();
 
-        if (book_params->is_modified()) {
-          page_locs.stop_document();
-          epub.update_book_format_params();
-          // See revert_to_defaults above: format-param edits make
-          // the snapshot's layout obsolete. Drop it so warm wake
-          // takes the normal boot path instead of painting stale.
-          // PageCache likewise invalidates so the next ±N residency
-          // request renders fresh entries against the new format.
-          wake_snapshot.invalidate();
-          page_cache.invalidate_all();
+      if (show_images       !=       old_show_images) book_params->put(BookParams::Ident::SHOW_IMAGES,        show_images      );
+      if (font_size         !=         old_font_size) book_params->put(BookParams::Ident::FONT_SIZE,          font_size        );
+      if (font              !=              old_font) book_params->put(BookParams::Ident::FONT,               font             );
+      if (use_fonts_in_book != old_use_fonts_in_book) book_params->put(BookParams::Ident::USE_FONTS_IN_BOOK,  use_fonts_in_book);
+
+      if (book_params->is_modified()) {
+        page_locs.stop_document();
+        epub.update_book_format_params();
+        // See revert_to_defaults above: format-param edits make
+        // the snapshot's layout obsolete. Drop it so warm wake
+        // takes the normal boot path instead of painting stale.
+        // PageCache likewise invalidates so the next ±N residency
+        // request renders fresh entries against the new format.
+        wake_snapshot.invalidate();
+        page_cache.invalidate_all();
+      }
+
+      book_params->save();
+
+      if (old_use_fonts_in_book != use_fonts_in_book) {
+        if (use_fonts_in_book) {
+          epub.load_fonts();
         }
-
-        book_params->save();
-
-        if (old_use_fonts_in_book != use_fonts_in_book) {
-          if (use_fonts_in_book) {
-            epub.load_fonts();
-          }
-          else {
-            fonts.clear();
-            fonts.clear_glyph_caches();
-          }
+        else {
+          fonts.clear();
+          fonts.clear_glyph_caches();
         }
+      }
 
-        if (old_font != font) {
-          fonts.adjust_default_font(font);
-        }
-     // }
+      if (old_font != font) {
+        fonts.adjust_default_font(font);
+      }
+
       menu_viewer.clear_highlight();
     }
   }
