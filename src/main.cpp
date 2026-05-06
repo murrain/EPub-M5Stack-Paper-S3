@@ -48,14 +48,6 @@
   {
     LOG_I("EPub-Inkplate Startup.");
 
-    // Boot-time DMA/internal-SRAM exhaustion is currently surfacing as
-    // ESP_ERR_NO_MEM in sdmmc_read_sectors during PageLocs::load.
-    // These four checkpoints (entry / post-platform-setup / post-fonts
-    // / post-screen) triangulate which boot phase consumes the
-    // DMA-capable internal pool. Remove once the leak is identified
-    // and fixed.
-    ESP::show_internal_heap_info("mainTask entry");
-
     bool nvs_mgr_res = nvs_mgr.setup();
 
     // Read the deep-sleep marker very early so all later boot-path code
@@ -85,8 +77,6 @@
     #else
       bool inkplate_err = !inkplate_platform.setup(true);
       if (inkplate_err) LOG_E("InkPlate6Ctrl Error.");
-
-      ESP::show_internal_heap_info("after inkplate_platform.setup");
 
       #if defined(BOARD_TYPE_PAPER_S3)
         if (!battery.setup()) {
@@ -120,12 +110,6 @@
 
       page_locs.setup();
 
-      // page_locs.setup spawns retrieverTask (60KB) + stateTask (10KB)
-      // pthreads. esp_pthread allocates task stacks from internal SRAM
-      // by default — 70KB right out of the DMA-capable region. If the
-      // post-setup snapshot drops by ~70KB this is where it goes.
-      ESP::show_internal_heap_info("after page_locs.setup");
-
       #if INKPLATE_6PLUS
         #define MSG "Press the WakUp Button to restart."
         #define INT_PIN TouchScreen::INTERRUPT_PIN
@@ -147,8 +131,6 @@
 
       if (fonts.setup()) {
 
-        ESP::show_internal_heap_info("after fonts.setup");
-
         Screen::Orientation    orientation;
         Screen::PixelResolution resolution;
         config.get(Config::Ident::ORIENTATION,      (int8_t *) &orientation);
@@ -166,8 +148,6 @@
         // ~700 ms boot epd_fullclear.
         screen.setup(resolution, orientation,
                      /*preserve_panel_image=*/SessionState::is_warm_wake());
-
-        ESP::show_internal_heap_info("after screen.setup");
 
         // Warm-wake fast path: paint the cached snapshot (the book
         // page the user was last viewing) onto the panel before the
@@ -251,7 +231,6 @@
 
         books_dir_controller.setup();
         LOG_D("Initialization completed");
-        ESP::show_internal_heap_info("before app_controller.start");
         app_controller.start();
       }
       else {

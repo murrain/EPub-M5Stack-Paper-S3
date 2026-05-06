@@ -1056,13 +1056,6 @@ bool PageLocs::load(const std::string & epub_filename)
 {
   std::string   filename = epub_filename.substr(0, epub_filename.find_last_of('.')) + ".locs";
 
-  // Heap snapshot before opening the .locs file. The SD-SPI driver's
-  // sector read needs DMA-capable internal SRAM; if the DMA pool is
-  // exhausted by this point we abort inside std::ifstream::read with
-  // ESP_ERR_NO_MEM (0x101). Logging both free + largest distinguishes
-  // exhaustion from fragmentation.
-  ESP::show_internal_heap_info("PageLocs::load entry");
-
   std::ifstream file(filename, std::ios::in | std::ios::binary);
 
   LOG_D("Loading pages location from file %s.", filename.c_str());
