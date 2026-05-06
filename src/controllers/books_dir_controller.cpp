@@ -11,6 +11,7 @@
 #include "models/config.hpp"
 #include "models/epub.hpp"
 #include "models/nvs_mgr.hpp"
+#include "models/page_cache.hpp"
 #include "models/page_locs.hpp"
 #include "models/session_state.hpp"
 #include "viewers/book_viewer.hpp"
@@ -228,12 +229,22 @@ BooksDirController::enter()
   // file → epub.open_file does its own internal close-then-open
   // anyway.
   //
+  // Lock-order discipline: pre-paint stop FIRST, then page_locs
+  // stop, then epub close. Pre-paint task acquires book_viewer.
+  // get_mutex during render and dereferences PageLocs::item_info
+  // + EPub state — freeing those before pre-paint is confirmed
+  // idle would UAF mid-render. STOP/STOPPED handshake inside
+  // page_cache.stop guarantees the task has exited any
+  // ScopedRenderTarget and released book_viewer's mutex before
+  // returning. See architecture review M4 for the rationale.
+  //
   // page_locs.stop_document() must precede close_file so the
   // RetrieverTask isn't mid-build when EPub state goes away (which
   // would page-fault on item_info.xml_doc dereferences). The new
   // stop_document also deep-cleans PageLocs::item_info, which would
   // otherwise hold dangling css_list pointers into the now-freed
   // EPub::css_cache.
+  page_cache.stop();
   page_locs.stop_document();
   epub.close_file();
 

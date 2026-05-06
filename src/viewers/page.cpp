@@ -283,8 +283,18 @@ Page::paint(Screen::UpdateMode mode, bool clear_screen, bool do_it)
   paint_impl(mode, clear_screen, do_it);
 }
 
+// Emit-only half of paint_impl. Walks display_list and calls
+// Screen::draw_*; does NOT call screen.update(). Used directly by
+// paint_to_active_target() (Stage 2 PageCache off-screen render
+// path); paint_impl() wraps this with the screen.update() call
+// for foreground rendering.
+//
+// Reverses display_list, so calling this twice without rebuilding
+// the list would render in opposite orders. Foreground callers
+// don't notice because they always rebuild via the interpreter
+// before paint(); off-screen callers must do the same.
 void
-Page::paint_impl(Screen::UpdateMode mode, bool clear_screen, bool do_it)
+Page::emit_display_list(bool clear_screen, bool do_it)
 {
   if (!do_it) if ((display_list.empty()) || (compute_mode != ComputeMode::DISPLAY)) return;
 
@@ -348,8 +358,25 @@ Page::paint_impl(Screen::UpdateMode mode, bool clear_screen, bool do_it)
         Screen::BLACK_COLOR);
     }
   }
+}
 
+// Foreground paint: emit then commit to panel.
+void
+Page::paint_impl(Screen::UpdateMode mode, bool clear_screen, bool do_it)
+{
+  emit_display_list(clear_screen, do_it);
   screen.update(mode);
+}
+
+// Off-screen paint: emit only. Caller (PageCache pre-paint task)
+// has a Screen::ScopedRenderTarget guard active so all the draw_*
+// calls inside emit_display_list write into the off-screen buffer.
+// Calling screen.update() here would assert against the panel/
+// active mismatch in Phase A — by design.
+void
+Page::paint_to_active_target(bool clear_screen, bool do_it)
+{
+  emit_display_list(clear_screen, do_it);
 }
 
 void

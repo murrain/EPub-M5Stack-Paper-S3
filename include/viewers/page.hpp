@@ -138,6 +138,12 @@ class Page
      */
     void paint_impl(Screen::UpdateMode mode, bool clear_screen, bool do_it);
 
+    // Display-list-walking core shared by paint_impl (foreground +
+    // panel commit) and paint_to_active_target (off-screen, no
+    // commit). Mutates display_list (reverses it) — caller must
+    // not call this twice on the same list without rebuilding.
+    void emit_display_list(bool clear_screen, bool do_it);
+
   public:
 
     Page();
@@ -295,6 +301,27 @@ class Page
      * @param do_it        Do the painting irrelevant of the compute mode.
      */
     void paint(Screen::UpdateMode mode, bool clear_screen = true, bool do_it = false);
+
+    /**
+     * @brief Emit the display list to the currently-active draw target,
+     *        WITHOUT calling screen.update().
+     *
+     * Used by the Stage 2 PageCache pre-paint task, which renders into
+     * a Screen::ScopedRenderTarget-aimed PSRAM scratch buffer and must
+     * not push that buffer to the panel. Calling screen.update() inside
+     * a guard would trip Phase A's assertion. This method is the
+     * "draw-only" half of paint(), without the panel-commit half.
+     *
+     * Foreground render paths should keep using paint() — it bundles
+     * the update at the right moment.
+     *
+     * @param clear_screen Screen contents (the active draw target) are
+     *                     erased before painting. Off-screen callers
+     *                     typically pass false and pre-fill their
+     *                     buffer themselves; foreground passes true.
+     * @param do_it        Do the painting irrelevant of compute mode.
+     */
+    void paint_to_active_target(bool clear_screen = false, bool do_it = false);
 
     void show_fmt(const Format & fmt, const char * spaces) const {
       #if DEBUGGING

@@ -12,6 +12,7 @@
 #include "models/books_dir.hpp"
 #include "models/epub.hpp"
 #include "models/config.hpp"
+#include "models/page_cache.hpp"
 #include "models/page_locs.hpp"
 #include "models/toc.hpp"
 #include "models/wake_snapshot.hpp"
@@ -132,12 +133,16 @@ revert_to_defaults()
   // outdated layout. Drop both the in-memory and on-disk copies so
   // the next wake takes the normal boot rendering path instead of
   // flashing the stale snapshot for ~2-4 s before the real render
-  // overwrites it.
+  // overwrites it. PageCache entries' format_hash check would catch
+  // this lazily, but explicit invalidate_all reclaims the slots
+  // immediately for the next ±N residency request rather than
+  // waiting for stale entries to be evicted by request_residency.
   wake_snapshot.invalidate();
+  page_cache.invalidate_all();
 
-  msg_viewer.show(MsgViewer::MsgType::INFO, 
-                  false, false, 
-                  "E-book parameters reverted", 
+  msg_viewer.show(MsgViewer::MsgType::INFO,
+                  false, false,
+                  "E-book parameters reverted",
                   "E-book parameters reverted to default values.");
 
   if (old_use_fonts_in_book != book_format_params->use_fonts_in_book) {
@@ -284,7 +289,10 @@ BookParamController::input_event(const EventMgr::Event & event)
           // See revert_to_defaults above: format-param edits make
           // the snapshot's layout obsolete. Drop it so warm wake
           // takes the normal boot path instead of painting stale.
+          // PageCache likewise invalidates so the next ±N residency
+          // request renders fresh entries against the new format.
           wake_snapshot.invalidate();
+          page_cache.invalidate_all();
         }
 
         book_params->save();
