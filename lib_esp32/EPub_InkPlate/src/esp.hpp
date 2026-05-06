@@ -88,4 +88,22 @@ public:
     ESP_LOGD(TAG, "%s | Free stack:        %7d |",      task_name, uxTaskGetStackHighWaterMark(nullptr));
     ESP_LOGD(TAG, "%s +----------------------------+",  task_name);
   }
+
+  // Internal-SRAM and DMA-capable-heap diagnostic. Separate from
+  // show_heaps_info because we hit it from boot code paths that
+  // suspect DMA-pool exhaustion (SD/SPI bounce buffers, epdiy LCD
+  // descriptors, etc.) and want INFO-level visibility regardless of
+  // build log level. Reports both free and largest-contiguous block
+  // so we can tell exhaustion from fragmentation.
+  static void show_internal_heap_info(const char * tag)
+  {
+    ESP_LOGI(TAG,
+      "[%s] internal free=%u largest=%u | DMA free=%u largest=%u | 8BIT free=%u",
+      tag,
+      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+      (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
+      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA),
+      (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
+  }
 };
