@@ -390,7 +390,19 @@ init_nvs()
 
 static MenuViewer::MenuEntry menu[] = {
 
-  { MenuViewer::Icon::RETURN,        "Return to the e-books list",           CommonActions::return_to_last    , true,  true  },
+  #if !(INKPLATE_6PLUS || TOUCH_TRIAL)
+    // Modal-OPTION dismissal affordance: pops the controller
+    // stack via CommonActions::return_to_last → set_controller
+    // (LAST), which on button builds lands back on DIR. On
+    // touch builds the menu strip is always visible from the
+    // books-dir screen (no modal to dismiss) and the LAST
+    // pop can resolve to BOOK or PARAM rather than DIR — user
+    // tapped this expecting "go back to my list", got the in-
+    // book menu instead. Excluded on touch; the BOOK entry
+    // below becomes menu[0] (also always-visible, satisfies
+    // the invariant in the comment above).
+    { MenuViewer::Icon::RETURN,        "Return to the e-books list",           CommonActions::return_to_last    , true,  true  },
+  #endif
   { MenuViewer::Icon::BOOK,          "Return to the last e-book being read", CommonActions::show_last_book    , true,  true  },
   { MenuViewer::Icon::MAIN_PARAMS,   "Main parameters",                      main_parameters                  , true,  true  },
   { MenuViewer::Icon::FONT_PARAMS,   "Default e-books parameters",           default_parameters               , true,  true  },
