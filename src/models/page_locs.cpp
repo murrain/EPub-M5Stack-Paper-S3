@@ -555,6 +555,11 @@ void
 PageLocs::setup()
 {
   #if EPUB_LINUX_BUILD
+    // Linux MQs persist in /dev/mqueue across program runs.
+    // Unlink the new paths AND the legacy "/mgr" name a former
+    // build of this binary may have left behind, so a dev-host
+    // upgrade doesn't accumulate stale kernel state.
+    mq_unlink("/mgr");
     mq_unlink("/asap");
     mq_unlink("/stopped");
     mq_unlink("/state");
@@ -879,9 +884,12 @@ PageLocs::retrieve_asap(int16_t itemref_index)
   LOG_D("==> Waiting for answer... <==");
   // asap_queue carries only ASAP_READY; STOPPED replies go to
   // stopped_queue. The mismatch case the original "ERROR!!!" log
-  // guarded against can no longer occur structurally.
+  // guarded against can no longer occur structurally. Logging
+  // the .req field anyway (always "ASAP_READY") keeps the trace
+  // shape stable for any external log-watcher and earns the
+  // discriminator field its keep.
   QUEUE_RECEIVE(asap_queue, mgr_queue_data, portMAX_DELAY);
-  LOG_D("-> ASAP_READY <-");
+  LOG_D("-> %s <-", (mgr_queue_data.req == MgrReq::ASAP_READY) ? "ASAP_READY" : "?");
   relax = false;
 
   return true;
@@ -907,7 +915,7 @@ PageLocs::stop_document()
   // either delivers a STOPPED or blocks forever (which would
   // indicate a missing send, not a wrong-type send).
   QUEUE_RECEIVE(stopped_queue, mgr_queue_data, portMAX_DELAY);
-  LOG_D("-> STOPPED <-");
+  LOG_D("-> %s <-", (mgr_queue_data.req == MgrReq::STOPPED) ? "STOPPED" : "?");
 
   // Retriever is now confirmed idle; safe to free the per-item state
   // it was working on. Without this, item_info.xml_doc + css_cache +
