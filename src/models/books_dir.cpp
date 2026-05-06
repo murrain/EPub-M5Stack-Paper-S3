@@ -170,13 +170,59 @@ BooksDir::read_books_directory(char * book_filename, int16_t & book_index,
 
   if (skip_refresh) {
     // Warm-wake fast path: skip the SD directory scan + per-file
-    // metadata refresh entirely. The cached DB entries from the
-    // previous session are accurate as long as the user hasn't
-    // added or removed books while powered off (the common case).
-    // Caller is responsible for invoking refresh() at a later
-    // moment (typically when the user navigates to the books
-    // directory) to pick up any changes.
-    LOG_D("Reading directory completed (refresh deferred).");
+    // stat() metadata check. But we MUST still walk the DB to
+    // rebuild the in-memory sorted_index — that map is wiped by
+    // deep sleep (it lives in DRAM that the PMU cuts power to)
+    // and every code path that needs to find a book by id, render
+    // the directory, or resume the last-read book consults it.
+    //
+    // Without this loop the original "skip everything" behavior
+    // produced an empty sorted_index across warm wake, which made
+    // BooksDirController::setup -> get_sorted_idx_from_id return
+    // -1, breaking the resume-last-book branch in enter() and
+    // rendering an empty directory list. The expensive parts of
+    // refresh() are the per-file stat() and the SD opendir scan
+    // for new books; walking the cached DB records is cheap and
+    // does no SD I/O beyond the sequential record reads of the
+    // already-open db file.
+    sorted_index.clear();
+
+    struct PartialRecord {
+      char     filename[FILENAME_SIZE];
+      int32_t  file_size;
+      uint32_t id;
+      char     title[TITLE_SIZE];
+    } * partial_record = (PartialRecord *) allocate(sizeof(PartialRecord));
+
+    if (partial_record == nullptr) {
+      LOG_E("warm-wake: unable to allocate partial record");
+      return false;
+    }
+
+    db.goto_first(); // pass the version record
+
+    while (db.goto_next()) {
+      db.get_record(partial_record, sizeof(PartialRecord));
+
+      #if EPUB_INKPLATE_BUILD
+        int8_t pos = nvs_mgr.get_pos(partial_record->id);
+        std::string title = " ";
+        title += partial_record->title;
+        title.front() = (pos >= 0) ? 'a' + pos : 'z';
+      #else
+        std::string title = "z";
+        title += partial_record->title;
+      #endif
+
+      sorted_index[title] = IndexInfo {
+        .id       = partial_record->id,
+        .db_index = db.get_current_idx() };
+    }
+
+    free(partial_record);
+
+    LOG_D("Reading directory completed (deferred SD scan, %d cached entries).",
+          (int)sorted_index.size());
     return true;
   }
 
