@@ -7,7 +7,8 @@
 
 #include "controllers/app_controller.hpp"
 #include "controllers/book_controller.hpp"
-#include "controllers/gestures.hpp"
+#include "controllers/option_controller.hpp"
+#include "viewers/menu_viewer.hpp"
 #include "models/books_dir.hpp"
 #include "models/config.hpp"
 #include "models/epub.hpp"
@@ -19,6 +20,8 @@
 #include "viewers/linear_books_dir_viewer.hpp"
 #include "viewers/matrix_books_dir_viewer.hpp"
 #include "screen.hpp"
+
+#include <cassert>
 
 #if EPUB_INKPLATE_BUILD
   #include "models/nvs_mgr.hpp"
@@ -287,6 +290,28 @@ BooksDirController::enter()
     if (current_book_index == -1) current_book_index = 0;
     current_book_index = books_dir_viewer->show_page_and_highlight(current_book_index);
   }
+
+  #if (INKPLATE_6PLUS || TOUCH_TRIAL)
+    // Paint the option menu as a persistent header strip on top
+    // of the just-rendered books area. The books viewer's
+    // first_entry_ypos was sized using BooksDirViewer::
+    // get_header_height() so the strip sits in unrendered
+    // (white) space — no overlap with book covers or list rows.
+    // Strip taps are dispatched inline by input_event below
+    // (no transition to a separate OPTION controller state).
+    // menu_viewer.show() commits via partial update_region for
+    // the strip area only — the just-painted books area stays
+    // put on the panel.
+    option_controller.show_menu();
+
+    // Drift assert: get_header_height() (the static formula
+    // mirror) and get_region_height() (the value computed
+    // inside show()) must agree. If they ever disagree, the
+    // formula in MenuViewer::compute_region_height has drifted
+    // from MenuViewer::show — fix the formula, not the assert.
+    // Both run after fonts load, so this is a tight equality.
+    assert(menu_viewer.get_region_height() == BooksDirViewer::get_header_height());
+  #endif
 }
 
 void 
@@ -304,18 +329,48 @@ BooksDirController::leave(bool going_to_deep_sleep)
 
     const BooksDir::EBookRecord * book;
 
-    // SWIPE_DOWN-from-top opens the menu (the unambiguous "drawer
-    // pull" gesture). NOT is_menu_open — that variant also fires
-    // on TAP-at-top, which steals the first-row book selection
-    // in matrix view (the first cover sits at y<TOP_EDGE_PX) and
-    // the top-of-list cell in linear view. The TAP case below
-    // already does book-hit-first with an OPTION fallback when
-    // no book is hit at the tap location, so a tap-at-top with
-    // no book under it still opens the menu — just via the
-    // hit-test path instead of an early return.
-    if (Gestures::is_menu_open_swipe(event)) {
-      current_book_index = -1;
-      app_controller.set_controller(AppController::Ctrl::OPTION);
+    // Sub-state takes priority. When the user picked a menu icon
+    // that opened a sub-form (main params, font params, date/time,
+    // calibration) or a key-press handshake (post-wifi, post-usb),
+    // the form_viewer / msg_viewer covers the screen and owns
+    // input. Delegate to OptionController's existing dispatch —
+    // it knows how to drive each sub-state and clear its flag on
+    // completion. After the dispatch we check whether the sub-
+    // state ended on this event; if so, the form left a stale
+    // image on the framebuffer where books used to be, so re-
+    // render the books area + strip to restore the books-dir
+    // screen.
+    if (option_controller.has_active_sub_state()) {
+      // skip_strip_refresh=true: we re-render below after the
+      // sub-state ends; the in-dispatch menu_viewer.show calls
+      // would commit a partial EPD update that the outer render
+      // immediately overwrites. See MenuControllerBase header.
+      option_controller.dispatch_to_sub_state(event, /*skip_strip_refresh=*/true);
+      if (!option_controller.has_active_sub_state()) {
+        // Sub-state just ended. Restore the books-dir UI.
+        books_dir_viewer->show_page_and_highlight(current_book_index);
+        option_controller.show_menu();
+      }
+      return;
+    }
+
+    // Tap on the persistent menu strip (top get_header_height()
+    // pixels) → fire the icon's action callback inline. Action
+    // may set a sub-state flag on OptionController; the next
+    // event routes to the dispatch above. The strip area never
+    // holds books (the books viewers reserve this space at
+    // setup() time using the same get_header_height value), so
+    // a tap here is unambiguously menu, never a book selection.
+    if (event.kind == EventMgr::EventKind::TAP &&
+        event.y < BooksDirViewer::get_header_height()) {
+      menu_viewer.event(event);
+      // For direct actions (refresh books, return to last book)
+      // the action transitions out of DIR via set_controller, so
+      // any lingering icon highlight is cleared on the next DIR
+      // entry. For sub-form-launching actions the form covers the
+      // strip immediately and clear_highlight runs when the form
+      // completes (inside dispatch_to_sub_state). No extra clear
+      // needed here.
       return;
     }
 
@@ -329,18 +384,12 @@ BooksDirController::leave(bool going_to_deep_sleep)
         break;
 
       case EventMgr::EventKind::TAP:
-        // Universal hit-test: a tap that lands on a book selects
-        // it, regardless of which view is active. LinearBooksDir-
-        // Viewer::get_index_at hits the full row width — no
-        // x-filter — see include/viewers/linear_books_dir_viewer
-        // .hpp::get_index_at. So a tap on the title or author
+        // Universal hit-test on the books area (y >=
+        // get_header_height(), after the early return above).
+        // LinearBooksDirViewer::get_index_at hits the full row
+        // width — see include/viewers/linear_books_dir_viewer
+        // .hpp::get_index_at — so a tap on the title or author
         // text selects the same book as a tap on the cover.
-        // Matrix view already worked this way. The legacy "tap
-        // on right two-thirds in linear view → menu" path is
-        // gone — menu open is the SWIPE_DOWN-from-top gesture,
-        // plus the fall-through here when get_index_at returns
-        // no hit (tap below the last row, or on a partial-page
-        // edge).
         current_book_index = books_dir_viewer->get_index_at(event.x, event.y);
         if ((current_book_index >= 0) && (current_book_index < books_dir.get_book_count())) {
           book = books_dir.get_book_data(current_book_index);
@@ -365,10 +414,10 @@ BooksDirController::leave(bool going_to_deep_sleep)
             }
           }
         }
-        else {
-          current_book_index = -1;
-          app_controller.set_controller(AppController::Ctrl::OPTION);
-        }
+        // No fallback to a separate OPTION state — a tap below
+        // the last row in linear view, or on a partial-page edge
+        // in matrix view, is treated as a no-op. The persistent
+        // menu strip is always available for menu actions.
         break;
 
       case EventMgr::EventKind::HOLD:

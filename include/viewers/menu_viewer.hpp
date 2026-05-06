@@ -38,6 +38,29 @@ class MenuViewer
     void  show(MenuEntry * the_menu, uint8_t entry_index = 0, bool clear_screen = false);
     bool event(const EventMgr::Event & event);
     void clear_highlight();
+
+    // Strip height as last computed during show() (instance
+    // value). Use compute_region_height() if you need the value
+    // before show() has run.
+    inline uint16_t get_region_height() const { return region_height; }
+
+    // Compute the strip's rendered height for the current font
+    // configuration WITHOUT needing show() to have run first.
+    // Mirror of the math in show(): 10 (top padding) + icon
+    // glyph height + 10 (icon-to-caption gap) + caption line
+    // height + 20 (bottom padding). Returns 0 if the required
+    // fonts aren't loaded yet — caller must defer.
+    //
+    // Why static: the books-dir viewers' setup() needs the strip
+    // height to compute their layout (first_entry_ypos), but
+    // setup() runs before any menu_viewer.show() — the strip
+    // is painted later in BooksDirController::enter(). Without
+    // a static way to get the height, the viewers would have
+    // to either bake in a hardcoded reservation (the original
+    // bug — bootloop when the actual strip overflowed 80) or
+    // call show() defensively (extra repaint). The static
+    // method is the right shape: same formula, no painting.
+    static uint16_t compute_region_height();
     
   private:
     static constexpr char const * TAG = "MenuViewer";

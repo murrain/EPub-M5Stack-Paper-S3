@@ -36,31 +36,15 @@ namespace Gestures {
     // SWIPE_DOWN that started near the top edge. The y on a
     // SWIPE_DOWN event is the touch START position (see the
     // FSM in event_mgr_paper_s3.cpp), so the same TOP_EDGE_PX
-    // gate applies to both gesture kinds.
-    //
-    // Use is_menu_open_swipe() (below) instead if your screen
-    // has tap targets that overlap the top edge — TAP can
-    // ambiguously mean "select that thing at the top" or
-    // "open the menu," and the screen needs to make that call
-    // itself.
+    // gate applies to both gesture kinds. Used by the book-
+    // reading screen, where the menu is a transient drawer.
+    // The books-dir screen does NOT use this — its menu is a
+    // persistent header strip and tap dispatch is geometric
+    // (y < get_header_height() → menu strip; otherwise
+    // book hit-test). See BooksDirController::input_event.
     inline bool is_menu_open(const EventMgr::Event & e) {
       return (e.kind == EventMgr::EventKind::TAP ||
               e.kind == EventMgr::EventKind::SWIPE_DOWN) &&
-             e.y < TOP_EDGE_PX;
-    }
-
-    // Narrow variant: only the SWIPE_DOWN-from-top gesture, NOT
-    // a TAP at the top. Use on screens whose top edge contains
-    // selectable content — the books-dir matrix view has covers
-    // in the first row, and on a linear view the top of the
-    // list is also tappable. Treating those taps as "open the
-    // menu" steals the user's intended selection. The screen's
-    // own hit-test runs first; if no item is hit, the screen
-    // can still route the tap to the menu (fallback path) — but
-    // a deliberate swipe-down is unambiguous and bypasses the
-    // hit-test.
-    inline bool is_menu_open_swipe(const EventMgr::Event & e) {
-      return e.kind == EventMgr::EventKind::SWIPE_DOWN &&
              e.y < TOP_EDGE_PX;
     }
 
@@ -82,7 +66,6 @@ namespace Gestures {
     // exist as always-false stubs so caller code stays build-
     // portable — the compiler folds the dead branch away.
     inline bool is_menu_open(const EventMgr::Event &) { return false; }
-    inline bool is_menu_open_swipe(const EventMgr::Event &) { return false; }
     inline bool is_menu_dismiss(const EventMgr::Event &) { return false; }
 
   #endif

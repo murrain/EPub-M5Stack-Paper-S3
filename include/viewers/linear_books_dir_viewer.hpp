@@ -18,9 +18,17 @@ class LinearBooksDirViewer : public BooksDirViewer
     static const int16_t AUTHOR_FONT           =  2;
     static const int16_t TITLE_FONT_SIZE       = 11;
     static const int16_t AUTHOR_FONT_SIZE      =  9;
-    static const int16_t FIRST_ENTRY_YPOS      =  5;
     static const int16_t SPACE_BETWEEN_ENTRIES =  6;
     static const int16_t MAX_TITLE_SIZE        = 85;
+
+    // Where the book list starts. On touch builds the persistent
+    // menu strip occupies the top get_header_height() pixels and
+    // we leave a small gap below; on button builds there's no
+    // strip so this is just the original 5 px top margin.
+    // Initialized in setup() because the touch value depends on
+    // font metrics (see BooksDirViewer::get_header_height) and
+    // can't be a static constexpr.
+    int16_t first_entry_ypos;
 
     int16_t current_item_idx;
     int16_t current_book_idx;
@@ -33,7 +41,7 @@ class LinearBooksDirViewer : public BooksDirViewer
 
   public:
 
-    LinearBooksDirViewer() : current_item_idx(-1), current_page_nbr(-1) {}
+    LinearBooksDirViewer() : first_entry_ypos(0), current_item_idx(-1), current_page_nbr(-1) {}
     
     void setup();
     
@@ -50,14 +58,14 @@ class LinearBooksDirViewer : public BooksDirViewer
 
     int16_t get_index_at(uint16_t x, uint16_t y) {
       // Guard against unsigned underflow when the tap lands in
-      // the FIRST_ENTRY_YPOS-pixel dead zone at the very top of
-      // the screen. Without this check (y - 5) wraps to ~65530
-      // and divides into a huge idx that happens to fail the
-      // books_per_page bounds check below — accidentally correct
-      // but relying on overflow arithmetic. Mirrors the explicit
-      // y < first_entry_ypos guard in MatrixBooksDirViewer.
-      if (y < FIRST_ENTRY_YPOS) return -1;
-      int16_t idx = (y - FIRST_ENTRY_YPOS) / (BooksDir::max_cover_height + SPACE_BETWEEN_ENTRIES);
+      // the dead zone at the very top of the screen. Without
+      // this check (y - first_entry_ypos) wraps and divides
+      // into a huge idx that happens to fail the books_per_page
+      // bounds check — accidentally correct but relying on
+      // overflow arithmetic. Mirrors the explicit y guard in
+      // MatrixBooksDirViewer::get_index_at.
+      if (y < first_entry_ypos) return -1;
+      int16_t idx = (y - first_entry_ypos) / (BooksDir::max_cover_height + SPACE_BETWEEN_ENTRIES);
       return (idx >= books_per_page) ? -1 : (current_page_nbr * books_per_page) + idx;
     }
 };

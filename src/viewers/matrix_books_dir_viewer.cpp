@@ -35,7 +35,17 @@ MatrixBooksDirViewer::setup()
   font = fonts.get(ScreenBottom::FONT);
   pagenbr_font_height = font->get_line_height(ScreenBottom::FONT_SIZE);
 
-  first_entry_ypos = (title_font_height << 1) + author_font_height + SPACE_BELOW_INFO + 10;
+  // On touch builds the menu strip occupies the top
+  // get_header_height() pixels permanently. The title/author
+  // header (drawn by highlight() / clear_highlight() to show the
+  // currently-selected book's metadata, plus the TOUCH_AND_HOLD
+  // hint by show_page) sits BELOW the strip — so the first book
+  // grid row starts after both. On button builds (no persistent
+  // strip) get_header_height() returns 0 and the calculation
+  // matches the original layout.
+  uint16_t header_height = BooksDirViewer::get_header_height();
+  title_area_top = header_height + 10;
+  first_entry_ypos = header_height + (title_font_height << 1) + author_font_height + SPACE_BELOW_INFO + 10;
 
   line_count = (Screen::get_height() - first_entry_ypos - pagenbr_font_height - SPACE_ABOVE_PAGENBR + MIN_SPACE_BETWEEN_ENTRIES) / 
                 (BooksDir::max_cover_height + MIN_SPACE_BETWEEN_ENTRIES);
@@ -96,7 +106,7 @@ MatrixBooksDirViewer::show_page(int16_t page_nbr, int16_t hightlight_item_idx)
       .margin_bottom      =     0,
       .screen_left        =    10,
       .screen_right       =    10,
-      .screen_top         =    10,
+      .screen_top         = title_area_top,
       .screen_bottom      =   100,
       .width              =     0,
       .height             =     0,
@@ -183,7 +193,7 @@ MatrixBooksDirViewer::show_page(int16_t page_nbr, int16_t hightlight_item_idx)
   }
 
   #if (INKPLATE_6PLUS || TOUCH_TRIAL)
-    fmt.screen_top = 10 + title_font_height;
+    fmt.screen_top = title_area_top + title_font_height;
     page.set_limits(fmt);
     page.new_paragraph(fmt);
     page.add_text(TOUCH_AND_HOLD_STR, fmt);
@@ -217,7 +227,7 @@ MatrixBooksDirViewer::highlight(int16_t item_idx)
     .margin_bottom      = 0,
     .screen_left        = 10,
     .screen_right       = 10,
-    .screen_top         = 10,
+    .screen_top         = title_area_top,
     .screen_bottom      = 100,
     .width              = 0,
     .height             = 0,
@@ -263,7 +273,7 @@ MatrixBooksDirViewer::highlight(int16_t item_idx)
                          Pos(xpos - 3, ypos - 3));
 
     page.clear_region(Dim(Screen::get_width() - 10, (title_font_height << 1) + author_font_height),
-                      Pos(10, 10));
+                      Pos(10, title_area_top));
   }
     // Highlight the new current item
 
@@ -294,7 +304,7 @@ MatrixBooksDirViewer::highlight(int16_t item_idx)
                       Pos(xpos - 3, ypos - 3));
 
   page.clear_region(Dim(Screen::get_width() - 10, (title_font_height << 1) + author_font_height),
-                    Pos(10, 10));
+                    Pos(10, title_area_top));
 
   fmt.font_index    = TITLE_FONT;
   fmt.font_size     = TITLE_FONT_SIZE;
@@ -367,7 +377,7 @@ MatrixBooksDirViewer::clear_highlight()
     .margin_bottom      = 0,
     .screen_left        = 10,
     .screen_right       = 10,
-    .screen_top         = 10,
+    .screen_top         = title_area_top,
     .screen_bottom      = (int16_t)(Screen::get_height() - (ypos + BooksDir::max_cover_width + 20)),
     .width              = 0,
     .height             = 0,
@@ -388,10 +398,10 @@ MatrixBooksDirViewer::clear_highlight()
                         Pos(xpos - 3, ypos - 3));
 
   page.clear_region(Dim(Screen::get_width() - 10, (title_font_height << 1) + author_font_height),
-                    Pos(10, 10));
+                    Pos(10, title_area_top));
 
   #if (INKPLATE_6PLUS || TOUCH_TRIAL)
-    fmt.screen_top = 10 + title_font_height;
+    fmt.screen_top = title_area_top + title_font_height;
     page.set_limits(fmt);
     page.new_paragraph(fmt);
     page.add_text(TOUCH_AND_HOLD_STR, fmt);

@@ -441,12 +441,18 @@ OptionController::set_font_count(uint8_t count)
   font_params_form_entries[2].u.ch.choice_count = count;
 }
 
-void 
+void
 OptionController::enter()
 {
   menu_viewer.show(menu);
   main_form_is_shown = false;
   font_form_is_shown = false;
+}
+
+void
+OptionController::show_menu()
+{
+  menu_viewer.show(menu);
 }
 
 #if INKPLATE_6PLUS || MENU_6PLUS
@@ -491,8 +497,16 @@ OptionController::has_active_sub_state() const
 }
 
 void
-OptionController::dispatch_to_sub_state(const EventMgr::Event & event)
+OptionController::dispatch_to_sub_state(
+  const EventMgr::Event & event,
+  bool                    skip_strip_refresh)
 {
+  // skip_strip_refresh: see MenuControllerBase header. When the
+  // caller is BooksDirController (persistent-strip flow), it
+  // re-renders the screen on sub-state completion, so any in-
+  // dispatch menu_viewer.show / clear_highlight here would just
+  // commit a partial EPD update that the outer render
+  // immediately overwrites — visible flicker on the strip.
   if (main_form_is_shown) {
     if (form_viewer.event(event)) {
       main_form_is_shown = false;
@@ -544,10 +558,10 @@ OptionController::dispatch_to_sub_state(const EventMgr::Event & event)
       #else
         if (old_orientation != orientation) {
       #endif
-        menu_viewer.show(menu, 2, true);
+        if (!skip_strip_refresh) menu_viewer.show(menu, 2, true);
       }
       else {
-        menu_viewer.clear_highlight();
+        if (!skip_strip_refresh) menu_viewer.clear_highlight();
       }
     }
   }
@@ -580,7 +594,7 @@ OptionController::dispatch_to_sub_state(const EventMgr::Event & event)
         }
       }
 
-      menu_viewer.clear_highlight();
+      if (!skip_strip_refresh) menu_viewer.clear_highlight();
     }
   }
 
@@ -588,7 +602,7 @@ OptionController::dispatch_to_sub_state(const EventMgr::Event & event)
     else if (date_time_form_is_shown) {
       if (form_viewer.event(event)) {
         date_time_form_is_shown = false;
-        menu_viewer.clear_highlight();
+        if (!skip_strip_refresh) menu_viewer.clear_highlight();
         set_clock();
       }
     }
@@ -626,7 +640,7 @@ OptionController::dispatch_to_sub_state(const EventMgr::Event & event)
     else if (calibration_is_shown) {
       if (event_mgr.calibration_event(event)) {
         calibration_is_shown = false;
-        menu_viewer.show(menu, 0, true);
+        if (!skip_strip_refresh) menu_viewer.show(menu, 0, true);
       }
     }
   #endif

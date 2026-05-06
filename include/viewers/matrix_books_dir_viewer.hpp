@@ -31,6 +31,14 @@ class MatrixBooksDirViewer : public BooksDirViewer
     int16_t  line_count;
     int16_t  page_count;
     int16_t  first_entry_ypos;
+    // Top-y of the title/author header band (where the
+    // highlighted book's metadata is drawn, plus the TOUCH_AND_
+    // HOLD hint). On touch builds this sits BELOW the persistent
+    // menu strip; on button builds the strip doesn't exist and
+    // it starts at y=10. Initialized in setup() because the
+    // touch value depends on get_header_height() which is
+    // runtime-computed from font metrics.
+    int16_t  title_area_top;
     uint16_t title_font_height;
     uint16_t author_font_height;
     uint16_t pagenbr_font_height;
@@ -42,7 +50,8 @@ class MatrixBooksDirViewer : public BooksDirViewer
 
   public:
 
-    MatrixBooksDirViewer() : current_item_idx(-1), current_page_nbr(-1) {}
+    MatrixBooksDirViewer() : current_item_idx(-1), current_page_nbr(-1),
+                             first_entry_ypos(0), title_area_top(0) {}
     
     void setup();
     

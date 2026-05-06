@@ -285,8 +285,14 @@ BookParamController::has_active_sub_state() const
 }
 
 void
-BookParamController::dispatch_to_sub_state(const EventMgr::Event & event)
+BookParamController::dispatch_to_sub_state(
+  const EventMgr::Event & event,
+  bool                    /*skip_strip_refresh*/)
 {
+  // BookParamController is only ever the modal in-book menu —
+  // never the inline persistent-strip path — so its menu_viewer
+  // refresh calls are always load-bearing. The skip flag exists
+  // for protocol uniformity with OptionController; ignore it.
   if (book_params_form_is_shown) {
     if (form_viewer.event(event)) {
       book_params_form_is_shown = false;
