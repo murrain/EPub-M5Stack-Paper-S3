@@ -107,7 +107,8 @@ extern "C" {
 #endif
 
 bool 
-BooksDir::read_books_directory(char * book_filename, int16_t & book_index)
+BooksDir::read_books_directory(char * book_filename, int16_t & book_index,
+                               bool skip_refresh)
 {
   LOG_D("Reading books directory: %s.", BOOKS_DIR_FILE);
 
@@ -165,6 +166,64 @@ BooksDir::read_books_directory(char * book_filename, int16_t & book_index)
       LOG_E("Not able to set DB Version.");
       return false;
     }
+  }
+
+  if (skip_refresh) {
+    // Warm-wake fast path: skip the SD directory scan + per-file
+    // stat() metadata check. But we MUST still walk the DB to
+    // rebuild the in-memory sorted_index — that map is wiped by
+    // deep sleep (it lives in DRAM that the PMU cuts power to)
+    // and every code path that needs to find a book by id, render
+    // the directory, or resume the last-read book consults it.
+    //
+    // Without this loop the original "skip everything" behavior
+    // produced an empty sorted_index across warm wake, which made
+    // BooksDirController::setup -> get_sorted_idx_from_id return
+    // -1, breaking the resume-last-book branch in enter() and
+    // rendering an empty directory list. The expensive parts of
+    // refresh() are the per-file stat() and the SD opendir scan
+    // for new books; walking the cached DB records is cheap and
+    // does no SD I/O beyond the sequential record reads of the
+    // already-open db file.
+    sorted_index.clear();
+
+    struct PartialRecord {
+      char     filename[FILENAME_SIZE];
+      int32_t  file_size;
+      uint32_t id;
+      char     title[TITLE_SIZE];
+    } * partial_record = (PartialRecord *) allocate(sizeof(PartialRecord));
+
+    if (partial_record == nullptr) {
+      LOG_E("warm-wake: unable to allocate partial record");
+      return false;
+    }
+
+    db.goto_first(); // pass the version record
+
+    while (db.goto_next()) {
+      db.get_record(partial_record, sizeof(PartialRecord));
+
+      #if EPUB_INKPLATE_BUILD
+        int8_t pos = nvs_mgr.get_pos(partial_record->id);
+        std::string title = " ";
+        title += partial_record->title;
+        title.front() = (pos >= 0) ? 'a' + pos : 'z';
+      #else
+        std::string title = "z";
+        title += partial_record->title;
+      #endif
+
+      sorted_index[title] = IndexInfo {
+        .id       = partial_record->id,
+        .db_index = db.get_current_idx() };
+    }
+
+    free(partial_record);
+
+    LOG_D("Reading directory completed (deferred SD scan, %d cached entries).",
+          (int)sorted_index.size());
+    return true;
   }
 
   if (!refresh(book_filename, book_index)) {
@@ -334,6 +393,9 @@ BooksDir::refresh(char * book_filename, int16_t & book_index, bool force_init)
   struct dirent * de       = nullptr;
   DIR           * dp       = nullptr;
   bool            first    = true;
+  // Hoisted out of the is_some_record_deleted() block so the
+  // error_clear path can free it on any goto-out from that block.
+  SimpleDB *      new_db   = nullptr;
 
   SortedIndex     temp_index;
 
@@ -408,7 +470,7 @@ BooksDir::refresh(char * book_filename, int16_t & book_index, bool force_init)
     // Some record have been deleted. We have to recreate a database
     // with the cleaned records
 
-    SimpleDB * new_db = new SimpleDB;
+    new_db = new SimpleDB;
     sorted_index.clear();
 
     if (new_db->create(NEW_DIR_FILE)) {
@@ -464,6 +526,7 @@ BooksDir::refresh(char * book_filename, int16_t & book_index, bool force_init)
       new_db->close();
 
       delete new_db;
+      new_db = nullptr;
       if (remove(BOOKS_DIR_FILE)) {
         LOG_E("Unable to remove directory DB file."); 
         goto error_clear;
@@ -653,6 +716,11 @@ BooksDir::refresh(char * book_filename, int16_t & book_index, bool force_init)
   return true;
 
 error_clear:
+  if (new_db) {
+    new_db->close();
+    delete new_db;
+    new_db = nullptr;
+  }
   temp_index.clear();
   if (dp) closedir(dp);
   if (the_book) free(the_book);

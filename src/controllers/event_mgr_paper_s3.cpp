@@ -84,24 +84,39 @@ static esp_err_t gt911_read_reg(uint8_t addr, uint16_t reg, uint8_t * data, size
   return ret;
 }
 
-static bool gt911_read_point(uint16_t * x, uint16_t * y)
+// Tri-state result of polling the GT911 controller. Distinguishing NO_DATA
+// from UP is critical: the GT911 buffer-ready bit drops between coordinate
+// updates during an in-progress swipe, and treating those polls as a release
+// would prematurely classify the gesture as a tap.
+enum class TouchSample : uint8_t { DOWN, NO_DATA, UP };
+
+static TouchSample gt911_sample(uint16_t * x, uint16_t * y)
 {
-  if (!gt911_ok || (x == nullptr) || (y == nullptr)) return false;
+  if (!gt911_ok || (x == nullptr) || (y == nullptr)) return TouchSample::UP;
 
   uint8_t status = 0;
-  if (gt911_read_reg(gt911_addr, 0x814E, &status, 1) != ESP_OK) return false;
+  // A transient I2C glitch on either read should be treated as NO_DATA, not
+  // UP, so an in-progress gesture is preserved across the hiccup rather than
+  // being silently terminated.
+  if (gt911_read_reg(gt911_addr, 0x814E, &status, 1) != ESP_OK) {
+    return TouchSample::NO_DATA;
+  }
 
-  if ((status & 0x80) == 0) return false;
+  // Buffer-not-ready: no fresh sample this poll. Do NOT ack — caller treats
+  // the previous touch state as still in effect.
+  if ((status & 0x80) == 0) return TouchSample::NO_DATA;
 
   uint8_t points = status & 0x0F;
   if (points == 0) {
     uint8_t zero = 0;
     gt911_write_reg(gt911_addr, 0x814E, &zero, 1);
-    return false;
+    return TouchSample::UP;
   }
 
   uint8_t data[4] = { 0 };
-  if (gt911_read_reg(gt911_addr, 0x8150, data, sizeof(data)) != ESP_OK) return false;
+  if (gt911_read_reg(gt911_addr, 0x8150, data, sizeof(data)) != ESP_OK) {
+    return TouchSample::NO_DATA;
+  }
 
   *x = (uint16_t)((data[1] << 8) | data[0]);
   *y = (uint16_t)((data[3] << 8) | data[2]);
@@ -109,7 +124,7 @@ static bool gt911_read_point(uint16_t * x, uint16_t * y)
   uint8_t zero = 0;
   gt911_write_reg(gt911_addr, 0x814E, &zero, 1);
 
-  return true;
+  return TouchSample::DOWN;
 }
 
 static void touch_task(void * param)
@@ -121,37 +136,69 @@ static void touch_task(void * param)
   // interaction as a TAP, horizontal SWIPE_LEFT / SWIPE_RIGHT, or HOLD /
   // RELEASE. Coordinates are reported in the logical Screen space.
 
-  constexpr uint16_t swipe_threshold          = 100; // pixels in GT911 space
-  constexpr uint16_t longpress_move_threshold =  30; // max motion during hold
-  constexpr uint32_t longpress_ms             = 600; // press duration
+  constexpr uint16_t swipe_distance_threshold  =  60;  // pixels — was 100
+  constexpr uint16_t swipe_velocity_min_dx     =  40;  // pixels for fast-flick path
+  constexpr uint32_t swipe_velocity_max_dt_ms  = 200;  // ms — fast flick must lift within this window
+  constexpr uint16_t longpress_move_threshold  =  30;  // max motion during hold
+  constexpr uint32_t longpress_ms              = 600;  // press duration
+  constexpr uint32_t poll_interval_ms          =  20;  // was 50
 
-  bool       touch_active = false;
-  bool       hold_sent    = false;
-  uint16_t   start_x      = 0;
-  uint16_t   start_y      = 0;
-  uint16_t   current_x    = 0;
-  uint16_t   current_y    = 0;
-  TickType_t start_tick   = 0;
+  bool       touch_active   = false;
+  bool       hold_sent      = false;
+  uint16_t   start_x        = 0;
+  uint16_t   start_y        = 0;
+  uint16_t   current_x      = 0;
+  uint16_t   current_y      = 0;
+  TickType_t start_tick     = 0;
+  int        max_signed_dx  = 0;  // peak signed X displacement during touch
+  int        max_abs_dy     = 0;  // peak |Y| displacement during touch
 
   while (true) {
     uint16_t x = 0;
     uint16_t y = 0;
 
-    bool has_touch = gt911_read_point(&x, &y);
+    TouchSample sample = gt911_sample(&x, &y);
+
+    // NO_DATA means the GT911 had no fresh buffer this poll. The finger is
+    // still presumed to be where it was; skip processing entirely so a brief
+    // gap in the controller's stream cannot be misread as a release.
+    if (sample == TouchSample::NO_DATA) {
+      vTaskDelay(pdMS_TO_TICKS(poll_interval_ms));
+      continue;
+    }
+
+    bool has_touch = (sample == TouchSample::DOWN);
 
     if (has_touch) {
       if (!touch_active) {
         // First contact
-        touch_active = true;
-        hold_sent    = false;
-        start_tick   = xTaskGetTickCount();
-        start_x      = current_x = x;
-        start_y      = current_y = y;
+        touch_active   = true;
+        hold_sent      = false;
+        start_tick     = xTaskGetTickCount();
+        start_x        = current_x = x;
+        start_y        = current_y = y;
+        max_signed_dx  = 0;
+        max_abs_dy     = 0;
       }
       else {
         // Update current finger position while it moves.
         current_x = x;
         current_y = y;
+      }
+
+      // Track peak displacement seen during this touch. The classifier on
+      // release uses these instead of endpoint deltas so a swipe that
+      // partly returns or whose final sample missed the peak still
+      // registers correctly.
+      {
+        int cur_dx     = (int)current_x - (int)start_x;
+        int cur_abs_dy = (int)current_y - (int)start_y;
+        if (cur_abs_dy < 0) cur_abs_dy = -cur_abs_dy;
+
+        int abs_cur_dx     = cur_dx >= 0 ? cur_dx : -cur_dx;
+        int abs_max_dx_now = max_signed_dx >= 0 ? max_signed_dx : -max_signed_dx;
+        if (abs_cur_dx > abs_max_dx_now) max_signed_dx = cur_dx;
+        if (cur_abs_dy > max_abs_dy)     max_abs_dy    = cur_abs_dy;
       }
 
       // Detect a long press while the finger is still down.
@@ -196,24 +243,25 @@ static void touch_task(void * param)
         TickType_t end_tick = xTaskGetTickCount();
         uint32_t   dt_ms    = (end_tick - start_tick) * portTICK_PERIOD_MS;
 
-        int dx    = (int)current_x - (int)start_x;
-        int dy    = (int)start_y   - (int)current_y; // positive when moving up
-        int abs_dx = dx >= 0 ? dx : -dx;
-        int abs_dy = dy >= 0 ? dy : -dy;
-
-        (void)dt_ms; // dt_ms currently unused but kept for potential tuning.
+        int abs_max_dx = max_signed_dx >= 0 ? max_signed_dx : -max_signed_dx;
 
         if (hold_sent) {
-          // End of a long-press sequence.
           ev.kind = EventMgr::EventKind::RELEASE;
         }
-        else if ((abs_dx > abs_dy) && (abs_dx > (int)swipe_threshold)) {
-          // Horizontal swipe for page-level navigation.
-          ev.kind = (dx > 0) ? EventMgr::EventKind::SWIPE_RIGHT
-                             : EventMgr::EventKind::SWIPE_LEFT;
+        else if (abs_max_dx > max_abs_dy) {
+          // Predominantly horizontal motion — candidate for swipe.
+          bool meets_distance = abs_max_dx > (int)swipe_distance_threshold;
+          bool meets_velocity = (abs_max_dx > (int)swipe_velocity_min_dx)
+                             && (dt_ms      < swipe_velocity_max_dt_ms);
+
+          if (meets_distance || meets_velocity) {
+            ev.kind = (max_signed_dx > 0) ? EventMgr::EventKind::SWIPE_RIGHT
+                                          : EventMgr::EventKind::SWIPE_LEFT;
+          } else {
+            ev.kind = EventMgr::EventKind::TAP;
+          }
         }
         else {
-          // Short interaction: treat as a TAP.
           ev.kind = EventMgr::EventKind::TAP;
         }
 
@@ -223,7 +271,7 @@ static void touch_task(void * param)
       }
     }
 
-    vTaskDelay(pdMS_TO_TICKS(50));
+    vTaskDelay(pdMS_TO_TICKS(poll_interval_ms));
   }
 }
 

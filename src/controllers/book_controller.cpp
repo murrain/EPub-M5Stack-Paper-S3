@@ -7,7 +7,10 @@
 
 #include "controllers/app_controller.hpp"
 #include "controllers/books_dir_controller.hpp"
+#include "models/books_dir.hpp"
 #include "models/epub.hpp"
+#include "models/session_state.hpp"
+#include "models/wake_snapshot.hpp"
 #include "viewers/book_viewer.hpp"
 #include "viewers/page.hpp"
 #include "viewers/msg_viewer.hpp"
@@ -16,9 +19,33 @@
   #include "nvs.h"
 #endif
 
-void 
+// Single rendering + snapshot-capture path. Every navigation handler
+// below goes through here rather than calling book_viewer.show_page
+// directly — that keeps BookViewer a pure renderer and ensures every
+// painted page is also captured for the warm-wake fast path.
+void
+BookController::show_and_capture(const PageLocs::PageId & page_id)
+{
+  book_viewer.show_page(page_id);
+
+  // Identify the book by its NVS id so the snapshot meta survives the
+  // sorted-index reshuffle that read_books_directory does each session.
+  // Skip the capture if we somehow paint without an active book — the
+  // snapshot would have no meaningful book_id to invalidate against
+  // and would just sit on disk shadowing the real (next) book's wake.
+  int16_t  bidx = books_dir_controller.get_current_book_index();
+  uint32_t book_id = 0;
+  if ((bidx >= 0) && books_dir.get_book_id((uint16_t)bidx, book_id)) {
+    uint32_t fh = WakeSnapshot::format_params_hash(
+                    epub.get_book_format_params(),
+                    sizeof(EPub::BookFormatParams));
+    wake_snapshot.capture(book_id, page_id, fh);
+  }
+}
+
+void
 BookController::enter()
-{ 
+{
   LOG_D("===> Enter()...");
 
   page_locs.check_for_format_changes(epub.get_item_count(), current_page_id.itemref_index);
@@ -31,7 +58,7 @@ BookController::enter()
     current_page_id.itemref_index = 0;
     current_page_id.offset        = 0;
   }
-  book_viewer.show_page(current_page_id);
+  show_and_capture(current_page_id);
 }
 
 void 
@@ -50,8 +77,26 @@ BookController::open_book_file(
 {
   LOG_D("===> open_book_file()...");
 
-  msg_viewer.show(MsgViewer::MsgType::BOOK, false, false, "Loading a book",
-     "The book \" %s \" is loading. Please wait.", book_title.c_str());
+  // Skip the "Loading a book" splash on warm wake so the sleep-screen
+  // / wallpaper stays visible until the first page is actually drawn.
+  // Replacing a beautiful wallpaper with a generic loading message for
+  // ~700 ms is the worst possible UX on resume.
+  const bool warm = SessionState::is_warm_wake();
+  if (!warm) {
+    msg_viewer.show(MsgViewer::MsgType::BOOK, false, false, "Loading a book",
+       "The book \" %s \" is loading. Please wait.", book_title.c_str());
+  }
+  // Consume the warm-wake budget here — subsequent book opens during
+  // this session are user-driven navigation (back to dir, pick another
+  // book) and deserve the normal splash UX.
+  //
+  // Cleared unconditionally (before the actual open work). If
+  // open_file() fails for the resume target, the user is returned to
+  // the books-dir and any retry there gets normal splash UX, which is
+  // the right semantics — the resume *was* attempted, the wallpaper
+  // was preserved as long as possible, and a failed resume is now a
+  // fresh user-driven navigation.
+  SessionState::clear_warm_wake();
 
   bool new_document = book_filename != epub.get_current_filename();
 
@@ -69,7 +114,7 @@ BookController::open_book_file(
     if (id != nullptr) {
       current_page_id.itemref_index = id->itemref_index;
       current_page_id.offset        = id->offset;
-      // book_viewer.show_page(current_page_id);
+      // show_and_capture(current_page_id);
       return true;
     }
   }
@@ -88,7 +133,7 @@ BookController::open_book_file(
           if (page_id != nullptr) {
             current_page_id.itemref_index = page_id->itemref_index;
             current_page_id.offset        = page_id->offset;
-            book_viewer.show_page(current_page_id);
+            show_and_capture(current_page_id);
           }
         }
         else {
@@ -96,7 +141,7 @@ BookController::open_book_file(
           if (page_id != nullptr) {
             current_page_id.itemref_index = page_id->itemref_index;
             current_page_id.offset        = page_id->offset;
-            book_viewer.show_page(current_page_id);
+            show_and_capture(current_page_id);
           }
         }
         break;
@@ -107,7 +152,7 @@ BookController::open_book_file(
           if (page_id != nullptr) {
             current_page_id.itemref_index = page_id->itemref_index;
             current_page_id.offset        = page_id->offset;
-            book_viewer.show_page(current_page_id);
+            show_and_capture(current_page_id);
           }
         }
         else {
@@ -115,7 +160,7 @@ BookController::open_book_file(
           if (page_id != nullptr) {
             current_page_id.itemref_index = page_id->itemref_index;
             current_page_id.offset        = page_id->offset;
-            book_viewer.show_page(current_page_id);
+            show_and_capture(current_page_id);
           }           
         }
         break;
@@ -127,7 +172,7 @@ BookController::open_book_file(
             if (page_id != nullptr) {
               current_page_id.itemref_index = page_id->itemref_index;
               current_page_id.offset        = page_id->offset;
-              book_viewer.show_page(current_page_id);
+              show_and_capture(current_page_id);
             }
           }
           else if (event.x > ((Screen::get_width() / 3) * 2)) {
@@ -135,7 +180,7 @@ BookController::open_book_file(
             if (page_id != nullptr) {
               current_page_id.itemref_index = page_id->itemref_index;
               current_page_id.offset        = page_id->offset;
-              book_viewer.show_page(current_page_id);
+              show_and_capture(current_page_id);
             }
           } else {           
             app_controller.set_controller(AppController::Ctrl::PARAM);
@@ -164,7 +209,7 @@ BookController::open_book_file(
         if (page_id != nullptr) {
           current_page_id.itemref_index = page_id->itemref_index;
           current_page_id.offset        = page_id->offset;
-          book_viewer.show_page(current_page_id);
+          show_and_capture(current_page_id);
         }
         break;
 
@@ -177,7 +222,7 @@ BookController::open_book_file(
         if (page_id != nullptr) {
           current_page_id.itemref_index = page_id->itemref_index;
           current_page_id.offset        = page_id->offset;
-          book_viewer.show_page(current_page_id);
+          show_and_capture(current_page_id);
         }
         break;
 
@@ -190,7 +235,7 @@ BookController::open_book_file(
         if (page_id != nullptr) {
           current_page_id.itemref_index = page_id->itemref_index;
           current_page_id.offset        = page_id->offset;
-          book_viewer.show_page(current_page_id);
+          show_and_capture(current_page_id);
         }
         break;
 
@@ -203,7 +248,7 @@ BookController::open_book_file(
         if (page_id != nullptr) {
           current_page_id.itemref_index = page_id->itemref_index;
           current_page_id.offset        = page_id->offset;
-          book_viewer.show_page(current_page_id);
+          show_and_capture(current_page_id);
         }
         break;
       

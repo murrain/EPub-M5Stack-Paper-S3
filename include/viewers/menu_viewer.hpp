@@ -12,13 +12,21 @@ class MenuViewer
   public:
     static constexpr uint8_t MAX_MENU_ENTRY = 15;
 
-    enum class Icon { RETURN,      CLR_HISTORY, REFRESH,   BOOK,   BOOK_LIST, MAIN_PARAMS, 
-                      FONT_PARAMS, POWEROFF,    WIFI,      INFO,   TOC,       DEBUG, 
-                      DELETE,      CLOCK,       NTP_CLOCK, CALIB,  PREV_MENU, NEXT_MENU, REVERT, END_MENU };
-    char icon_char[19] = { 
-                      '@',         'T',         'R',       'E',    'F',       'C', 
-                      'A',         'Z',         'S',       'I',    'L',       'H', 
-                      'K',         'N',         'Y',       'M',    'O',       'P',   'U' };
+    enum class Icon { RETURN,      CLR_HISTORY, REFRESH,   BOOK,   BOOK_LIST, MAIN_PARAMS,
+                      FONT_PARAMS, POWEROFF,    WIFI,      INFO,   TOC,       DEBUG,
+                      DELETE,      CLOCK,       NTP_CLOCK, CALIB,  PREV_MENU, NEXT_MENU, REVERT,
+                      USB_DRIVE,
+                      END_MENU };
+    // One char per Icon enum value (END_MENU excluded). Maps to a
+    // glyph in drawings.otf — most letters render as a unique icon
+    // baked into the font. USB_DRIVE was added at codepoint 'V' in
+    // a font edit alongside this enum extension; bump the array
+    // size to match the new entry.
+    char icon_char[20] = {
+                      '@',         'T',         'R',       'E',    'F',       'C',
+                      'A',         'Z',         'S',       'I',    'L',       'H',
+                      'K',         'N',         'Y',       'M',    'O',       'P',   'U',
+                      'V' };
     struct MenuEntry {
       Icon icon;
       const char * caption;

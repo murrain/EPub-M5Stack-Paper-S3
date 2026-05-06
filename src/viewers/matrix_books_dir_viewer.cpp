@@ -42,8 +42,14 @@ MatrixBooksDirViewer::setup()
 
   column_count = (Screen::get_width() - 10 + MIN_SPACE_BETWEEN_ENTRIES) / (BooksDir::max_cover_width + MIN_SPACE_BETWEEN_ENTRIES);
 
-  horiz_space_between_entries = (Screen::get_width() - 10 - (BooksDir::max_cover_width * column_count)) / (column_count - 1);
-  vert_space_between_entries  = (Screen::get_height() - first_entry_ypos - pagenbr_font_height - SPACE_ABOVE_PAGENBR - (BooksDir::max_cover_height * line_count)) / (line_count - 1);
+  // Guard against divide-by-zero on unusually narrow/short configurations.
+  // ARM Cortex divide-by-zero is a hard fault, not a silent NaN.
+  horiz_space_between_entries = (column_count > 1)
+    ? ((Screen::get_width() - 10 - (BooksDir::max_cover_width * column_count)) / (column_count - 1))
+    : 0;
+  vert_space_between_entries  = (line_count > 1)
+    ? ((Screen::get_height() - first_entry_ypos - pagenbr_font_height - SPACE_ABOVE_PAGENBR - (BooksDir::max_cover_height * line_count)) / (line_count - 1))
+    : 0;
   books_per_page              = line_count * column_count;
   page_count                  = (books_dir.get_book_count() + books_per_page - 1) / books_per_page;
 
@@ -392,7 +398,7 @@ MatrixBooksDirViewer::clear_highlight()
     page.end_paragraph(fmt);
   #endif
 
-  #if EPUB_INKPLATE_BUILD && !BOARD_TYPE_PAPER_S3
+  #if EPUB_INKPLATE_BUILD
     BatteryViewer::show();
   #endif
 
@@ -437,7 +443,13 @@ MatrixBooksDirViewer::next_page()
   }
   else if ((page_nbr + 1) == page_count) {
     #if !(INKPLATE_6PLUS || TOUCH_TRIAL)
-      highlight(books_dir.get_book_count() % books_per_page - 1);
+      // When the book count is an exact multiple of books_per_page,
+      // the modulo is 0 and `0 - 1 = -1` produced an invalid highlight
+      // index that silently no-op'd via the nullptr guard in highlight().
+      // The last page is full in that case — highlight the final slot.
+      int16_t last_item = books_dir.get_book_count() % books_per_page;
+      if (last_item == 0) last_item = books_per_page;
+      highlight(last_item - 1);
     #endif
     current_book_idx = books_dir.get_book_count() - 1;
   }

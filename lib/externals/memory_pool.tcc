@@ -53,7 +53,7 @@ noexcept
   memoryPool.currentBlock_ = nullptr;
   currentSlot_ = memoryPool.currentSlot_;
   lastSlot_ = memoryPool.lastSlot_;
-  freeSlots_ = memoryPool.freeSlots;
+  freeSlots_ = memoryPool.freeSlots_;
 }
 
 template <typename T, size_t BlockSize>
@@ -73,7 +73,7 @@ noexcept
     std::swap(currentBlock_, memoryPool.currentBlock_);
     currentSlot_ = memoryPool.currentSlot_;
     lastSlot_ = memoryPool.lastSlot_;
-    freeSlots_ = memoryPool.freeSlots;
+    freeSlots_ = memoryPool.freeSlots_;
   }
   return *this;
 }

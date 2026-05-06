@@ -311,9 +311,13 @@ destroy_app( GtkWidget *widget, gpointer   data )
   gtk_main_quit();
 }
 
-void 
-Screen::setup(PixelResolution resolution, Orientation orientation)
+void
+Screen::setup(PixelResolution resolution, Orientation orientation,
+              bool preserve_panel_image)
 {
+  // No e-ink panel on the Linux dev build, so the warm-wake hint is
+  // ignored. Accepted for API parity with the device builds.
+  (void)preserve_panel_image;
   set_orientation(orientation);
   set_pixel_resolution(resolution);
 

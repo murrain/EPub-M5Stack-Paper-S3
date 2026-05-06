@@ -5,11 +5,14 @@
 #define __BATTERY_VIEWER__ 1
 #include "viewers/battery_viewer.hpp"
 
-// Battery viewer relies on Inkplate's battery driver; skip for Paper S3.
-#if EPUB_INKPLATE_BUILD && !BOARD_TYPE_PAPER_S3
+#if EPUB_INKPLATE_BUILD
   #include "viewers/page.hpp"
   #include "models/config.hpp"
-  #include "battery.hpp"
+  #if defined(BOARD_TYPE_PAPER_S3)
+    #include "battery_paper_s3.hpp"
+  #else
+    #include "battery.hpp"
+  #endif
   #include "screen.hpp"
   #include "logging.hpp"
 
@@ -62,8 +65,16 @@
       return;
     }
 
-    float   value = ((voltage - 2.5) * 4.0) / 1.2;
-    int16_t icon_index =  value; // max is 3.7
+    // Map voltage to icon index 0..4.
+    // Inkplate uses a 2x AAA pack (2.5V empty .. 3.7V full nominal); the
+    // PaperS3 uses a single Li-ion cell (3.3V empty .. 4.15V full).
+    #if defined(BOARD_TYPE_PAPER_S3)
+      float   value = ((voltage - 3.30) * 4.0) / 0.85;
+    #else
+      float   value = ((voltage - 2.5) * 4.0) / 1.2;
+    #endif
+    int16_t icon_index = value;
+    if (icon_index < 0) icon_index = 0;
     if (icon_index > 4) icon_index = 4;
 
     static constexpr char icons[5] = { '0', '1', '2', '3', '4' };
@@ -92,8 +103,13 @@
       char str[10];
 
       if (view_mode == 1) {
-        int percentage = ((voltage - 2.5) * 100.0) / 1.2;
+        #if defined(BOARD_TYPE_PAPER_S3)
+          int percentage = battery.read_percentage();
+        #else
+          int percentage = ((voltage - 2.5) * 100.0) / 1.2;
+        #endif
         if (percentage > 100) percentage = 100;
+        if (percentage < 0)   percentage = 0;
         sprintf(str, "%d%c", percentage, '%');
       }
       else if (view_mode == 2) {

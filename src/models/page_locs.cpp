@@ -55,6 +55,9 @@ struct RetrieveQueueData {
   #define QUEUE_RECEIVE(q, m, t)  mq_receive(q,       (char *) &m, sizeof(m), nullptr)
 #else
   #include <esp_pthread.h>
+  #include <esp_heap_caps.h>
+  #include <freertos/FreeRTOS.h>
+  #include <freertos/task.h>
 
   static esp_pthread_cfg_t create_config(const char *name, int core_id, int stack, int prio)
   {
@@ -63,6 +66,20 @@ struct RetrieveQueueData {
       cfg.pin_to_core = core_id;
       cfg.stack_size = stack;
       cfg.prio = prio;
+      // Place these large pthread stacks in PSRAM. retrieverTask
+      // (60 KB) and stateTask (10 KB) together would otherwise consume
+      // ~70 KB of MALLOC_CAP_INTERNAL/MALLOC_CAP_DMA, leaving SD-SPI
+      // bounce-buffer allocations (sdmmc_read_sectors) without enough
+      // contiguous DMA memory at PageLocs::load time and aborting via
+      // an unallocatable ios::failure throw. Neither thread passes
+      // stack-resident buffers to a DMA peripheral; their work is XML
+      // parsing, page formatting and PSRAM framebuffer writes — all
+      // CPU-mediated — so the PSRAM access penalty is negligible
+      // compared to the SD/iostream costs they're already bound by.
+      // Requires CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y, present
+      // in sdkconfig.paper_s3. MALLOC_CAP_8BIT is mandated by
+      // esp_pthread_set_cfg.
+      cfg.stack_alloc_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
       return cfg;
   }
 
@@ -86,9 +103,21 @@ class StateTask
     int16_t   next_itemref_to_get; // Non prioritize item to get next
     int16_t   asap_itemref;        // Prioritize item to get next
     uint8_t * bitset;              // Set of all items processed so far
-    uint8_t   bitset_size;         // bitset byte length
+    uint16_t  bitset_size;         // bitset byte length (uint8_t silently
+                                   // overflowed for books with >2040 spine
+                                   // items, leading to a too-small alloc and
+                                   // out-of-bounds bit access — heap corruption)
     bool      stopping;
     bool      forget_retrieval;    // Forget current item begin processed by retrieval task
+
+    // Cooperative-abort flag observed by RetrieverTask's CPU-heavy paths
+    // (build_page_locs / page_end). Set on STOP, cleared on START_DOCUMENT.
+    // volatile is sufficient: both StateTask and RetrieverTask are pinned
+    // to core 0 (see esp_pthread cfg below), so no cross-core ordering is
+    // required. std::atomic would be over-engineering here.
+    // Distinct from forget_retrieval, whose semantics ("discard partial
+    // inserts") are set/cleared in multiple unrelated places.
+    volatile bool aborting;
 
     StateQueueData       state_queue_data;
     RetrieveQueueData retrieve_queue_data;
@@ -175,8 +204,8 @@ class StateTask
     }
 
   public:
-    StateTask() : 
-          retriever_iddle(   true), 
+    StateTask() :
+          retriever_iddle(   true),
             itemref_count(     -1),
       waiting_for_itemref(     -1),
       next_itemref_to_get(     -1),
@@ -184,7 +213,8 @@ class StateTask
                    bitset(nullptr),
               bitset_size(      0),
                  stopping(  false),
-         forget_retrieval(  false)  { }
+         forget_retrieval(  false),
+                 aborting(  false)  { }
 
     void operator()() {
       for(;;) {
@@ -198,6 +228,11 @@ class StateTask
 
           case StateReq::STOP:
             LOG_D("-> STOP <-");
+            // Set abort flag first so a long-running build_page_locs on
+            // RetrieverTask sees it at its next cooperative_check() and
+            // unwinds promptly, avoiding the stop_document() deadlock
+            // window where StateTask blocks waiting for ITEM_READY.
+            aborting         = true;
             itemref_count    = -1;
             forget_retrieval = true;
             if (bitset != nullptr) {
@@ -218,9 +253,28 @@ class StateTask
 
           case StateReq::START_DOCUMENT:
             LOG_D("-> START_DOCUMENT <-");
+            // Fresh document: clear any stale abort signal from a prior STOP.
+            aborting      = false;
             if (bitset) delete [] bitset;
             itemref_count = state_queue_data.itemref_count;
-            bitset_size   = (itemref_count + 7) >> 3;
+            // Guard against malformed EPUBs reporting <= 0 spine items.
+            // Without this, bitset_size = (-1 + 7) >> 3 (or 0) leads to a
+            // zero-byte allocation followed by indexed access at line ~283,
+            // which is undefined behavior.
+            if (itemref_count <= 0) {
+              bitset           = nullptr;
+              bitset_size      = 0;
+              itemref_count    = -1;
+              retriever_iddle  = true;
+              forget_retrieval = true;
+              // Reset stopping defensively: a prior STOP that left
+              // stopping=true would otherwise cause the next
+              // ITEM_READY/ASAP_READY (if any racy in-flight reply
+              // arrives) to fire a spurious STOPPED into mgr_queue.
+              stopping         = false;
+              break;
+            }
+            bitset_size   = (uint16_t)((itemref_count + 7) >> 3);
             bitset        = new uint8_t[bitset_size];
             if (bitset) {
               memset(bitset, 0, bitset_size);
@@ -336,17 +390,22 @@ class StateTask
             LOG_D("-> ASAP_READY <-");
             waiting_for_itemref = -1;
             if (itemref_count != -1) {
-              int16_t itemref              = state_queue_data.itemref_index;
+              int16_t itemref = state_queue_data.itemref_index;
+              // Correct the negative-encoded failure marker BEFORE sending
+              // to mgr_queue. The original code sent the raw (possibly
+              // negative) itemref, so any future receiver that inspects
+              // the index would see an out-of-range value. Match the
+              // ITEM_READY handler's correct-then-use pattern.
+              if (itemref < 0) {
+                itemref = -(itemref + 1);
+                LOG_E("Unable to retrieve pages location for item %d", itemref);
+              }
               mgr_queue_data = {
                 .req           = MgrReq::ASAP_READY,
                 .itemref_index = itemref
               };
               QUEUE_SEND(mgr_queue, mgr_queue_data, 0);
               LOG_D("Sent ASAP_READY to Mgr");
-              if (itemref < 0) {
-                itemref = -(itemref + 1);
-                LOG_E("Unable to retrieve pages location for item %d", itemref);
-              }
               bitset[itemref >> 3] |= (1 << (itemref & 7));
               if (stopping) {
                 stopping = false;
@@ -377,8 +436,9 @@ class StateTask
       }
     }
 
-    inline bool   retriever_is_iddle() { return retriever_iddle;  } 
+    inline bool   retriever_is_iddle() { return retriever_iddle;  }
     inline bool forgetting_retrieval() { return forget_retrieval; }
+    inline bool          is_aborting() const { return aborting;   }
 
 } state_task;
 
@@ -500,7 +560,29 @@ PageLocs::abort_threads()
   state_thread.~thread();
 }
 
-class PageLocsInterp : public HTMLInterpreter 
+// Cooperative check called from inside RetrieverTask's CPU-heavy paths.
+// Returns true if the caller should abort (a STOP was issued). Always
+// yields to the scheduler so lower-priority UI tasks can run during long
+// page-layout computation. Consolidates WDT-reset + yield + abort-check
+// so the build loop never CPU-spins on core 0 at priority MAX-2 and
+// starves the UI task.
+static inline bool cooperative_check() {
+  #if EPUB_INKPLATE_BUILD && !defined(BOARD_TYPE_PAPER_S3)
+    esp_task_wdt_reset();
+  #endif
+  #if EPUB_LINUX_BUILD
+    std::this_thread::yield();
+  #else
+    // 1 tick (~10 ms at default tick rate). Unlike taskYIELD()/
+    // std::this_thread::yield(), vTaskDelay actually drops the running
+    // task into the Blocked state, allowing any ready task at lower
+    // priority on the same core to run.
+    vTaskDelay(1);
+  #endif
+  return state_task.is_aborting();
+}
+
+class PageLocsInterp : public HTMLInterpreter
 {
   public:
     PageLocsInterp(Page & the_page, DOM & the_dom, Page::ComputeMode the_comp_mode, const EPub::ItemInfo & the_item) : 
@@ -535,10 +617,23 @@ class PageLocsInterp : public HTMLInterpreter
                       << page_info.size << std::endl;
           #endif
         }
-        // Gives the chance to book_viewer to show a page if required
+        // Gives the chance to book_viewer to show a page if required.
+        // Drop the mutex around the yield so the UI task can grab it,
+        // then run cooperative_check() which (a) yields with real
+        // scheduler descheduling (vTaskDelay(1) on FreeRTOS) and (b)
+        // observes the aborting flag set by StateTask's STOP handler.
         book_viewer.get_mutex().unlock();
-        std::this_thread::yield();
+        const bool should_abort = cooperative_check();
         book_viewer.get_mutex().lock();
+        if (should_abort) {
+          // Return false up the build_pages_recurse chain. html_interpreter
+          // already treats a false return from page_end as "abort the
+          // recursion" (see all `if (!page_end(fmt)) return false;` sites
+          // in src/viewers/html_interpreter.cpp), so build_page_locs's
+          // `if (!interp->build_pages_recurse(...)) break;` path triggers
+          // and falls through to the existing dom/css cleanup.
+          return false;
+        }
 
         // LOG_D("Page %d, offset: %d, size: %d", epub.get_page_count(), loc.offset, loc.size);
     
@@ -560,6 +655,11 @@ class PageLocsInterp : public HTMLInterpreter
 bool
 PageLocs::build_page_locs(int16_t itemref_index)
 {
+  // Fast-path: if a STOP arrived before we even started this item,
+  // bail out before contending for the book_viewer mutex (which the
+  // UI task may itself be waiting on).
+  if (state_task.is_aborting()) return false;
+
   std::scoped_lock guard(book_viewer.get_mutex());
 
   Font * font = fonts.get(ScreenBottom::FONT);
@@ -632,6 +732,13 @@ PageLocs::build_page_locs(int16_t itemref_index)
 
     while (!done) {
 
+      // Cooperative check at the top of the build loop: yields to the UI
+      // task and observes the abort flag. Subsumes the WDT-reset that
+      // used to live just below page_out.start(fmt); doing it here means
+      // we never enter build_pages_recurse (the deep-recursion CPU hog)
+      // without first giving up the CPU and re-checking abort.
+      if (cooperative_check()) break;
+
       // current_offset       = 0;
       // start_of_page_offset = 0;
       xml_node node;
@@ -640,10 +747,6 @@ PageLocs::build_page_locs(int16_t itemref_index)
 
         page_out.start(fmt);
 
-        #if EPUB_INKPLATE_BUILD && !defined(BOARD_TYPE_PAPER_S3)
-          esp_task_wdt_reset();
-        #endif
-        
         Page::Format * new_fmt = interp->duplicate_fmt(fmt);
         if (!interp->build_pages_recurse(node, *new_fmt, dom->body, 1)) {
           interp->release_fmt(new_fmt);
@@ -667,6 +770,9 @@ PageLocs::build_page_locs(int16_t itemref_index)
     //dom->show();
     delete dom;
     dom = nullptr;
+
+    delete interp;
+    interp = nullptr;
   }
 
   //page_out.set_compute_mode(Page::ComputeMode::DISPLAY);
@@ -949,6 +1055,7 @@ PageLocs::check_for_format_changes(int16_t count, int16_t itemref_index, bool fo
 bool PageLocs::load(const std::string & epub_filename)
 {
   std::string   filename = epub_filename.substr(0, epub_filename.find_last_of('.')) + ".locs";
+
   std::ifstream file(filename, std::ios::in | std::ios::binary);
 
   LOG_D("Loading pages location from file %s.", filename.c_str());

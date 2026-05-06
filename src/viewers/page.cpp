@@ -273,8 +273,21 @@ Page::put_char_at(char ch, Pos pos, const Format & fmt)
 void
 Page::paint(bool clear_screen, bool no_full, bool do_it)
 {
+  paint_impl(no_full ? Screen::UpdateMode::FORCE_PARTIAL : Screen::UpdateMode::BUDGETED,
+             clear_screen, do_it);
+}
+
+void
+Page::paint(Screen::UpdateMode mode, bool clear_screen, bool do_it)
+{
+  paint_impl(mode, clear_screen, do_it);
+}
+
+void
+Page::paint_impl(Screen::UpdateMode mode, bool clear_screen, bool do_it)
+{
   if (!do_it) if ((display_list.empty()) || (compute_mode != ComputeMode::DISPLAY)) return;
-  
+
   if (clear_screen) screen.clear();
 
   display_list.reverse();
@@ -294,49 +307,49 @@ Page::paint(bool clear_screen, bool no_full, bool do_it)
     }
     else if (entry->command == DisplayListCommand::IMAGE) {
       screen.draw_bitmap(
-        entry->kind.image_entry.image.bitmap, 
-        entry->kind.image_entry.image.dim,  
+        entry->kind.image_entry.image.bitmap,
+        entry->kind.image_entry.image.dim,
         entry->pos);
     }
     else if (entry->command == DisplayListCommand::HIGHLIGHT) {
       screen.draw_rectangle(
-        entry->kind.region_entry.dim, 
-        entry->pos, 
+        entry->kind.region_entry.dim,
+        entry->pos,
         Screen::BLACK_COLOR);
     }
     else if (entry->command == DisplayListCommand::CLEAR_HIGHLIGHT) {
       screen.draw_rectangle(
-        entry->kind.region_entry.dim, 
+        entry->kind.region_entry.dim,
         entry->pos,
         Screen::WHITE_COLOR);
     }
     else if (entry->command == DisplayListCommand::ROUNDED) {
       screen.draw_round_rectangle(
-        entry->kind.region_entry.dim, 
-        entry->pos, 
+        entry->kind.region_entry.dim,
+        entry->pos,
         Screen::BLACK_COLOR);
     }
     else if (entry->command == DisplayListCommand::CLEAR_ROUNDED) {
       screen.draw_round_rectangle(
-        entry->kind.region_entry.dim, 
+        entry->kind.region_entry.dim,
         entry->pos,
         Screen::WHITE_COLOR);
     }
     else if (entry->command == DisplayListCommand::CLEAR_REGION) {
       screen.colorize_region(
-        entry->kind.region_entry.dim, 
+        entry->kind.region_entry.dim,
         entry->pos,
         Screen::WHITE_COLOR);
     }
     else if (entry->command == DisplayListCommand::SET_REGION) {
       screen.colorize_region(
-        entry->kind.region_entry.dim, 
+        entry->kind.region_entry.dim,
         entry->pos,
         Screen::BLACK_COLOR);
     }
   }
 
-  screen.update(no_full);
+  screen.update(mode);
 }
 
 void
@@ -675,7 +688,12 @@ Page::add_word(const char * word,  const Format & fmt)
 
   Font::Glyph * glyph;
 
-  DisplayList      * the_list = new DisplayList;
+  // Stack-local DisplayList: was previously `new DisplayList`/`delete`
+  // on every word — 400-600 heap round-trips per typical page. The
+  // forward_list itself is just two pointers + node allocator; no
+  // benefit to heap-allocating it. Entries (DisplayListEntry*) are
+  // pool-allocated separately and unaffected.
+  DisplayList        the_list;
   const char       * str      = word;
   int16_t            height   = font->get_line_height(fmt.font_size);
   int16_t            width    = 0;
@@ -712,7 +730,7 @@ Page::add_word(const char * word,  const Format & fmt)
       entry->kind.glyph_entry.is_space = false;
       entry->pos.y                     = fmt.vertical_align;
 
-      the_list->push_front(entry);
+      the_list.push_front(entry);
     }
   }
 
@@ -720,11 +738,9 @@ Page::add_word(const char * word,  const Format & fmt)
 
   if (width >= avail_width) {
     if (strncasecmp(word, "http", 4) == 0) {
-      for (auto * entry : *the_list) {
+      for (auto * entry : the_list) {
         display_list_entry_pool.deleteElement(entry);
       }
-      the_list->clear();
-      delete the_list;
       return add_word("[URL removed]", fmt);
     }
     else {
@@ -732,31 +748,28 @@ Page::add_word(const char * word,  const Format & fmt)
     }
   }
 
-  
+
   if ((line_width + width) >= avail_width) {
     add_line(fmt, true);
     screen_is_full = NEXT_LINE_REQUIRED_SPACE > max_y;
     if (screen_is_full) {
-      for (auto * entry : *the_list) {
+      for (auto * entry : the_list) {
         display_list_entry_pool.deleteElement(entry);
       }
-      the_list->clear();
-      delete the_list;
       return false;
     }
   }
 
-  line_list.splice_after(line_list.before_begin(), *the_list);
+  line_list.splice_after(line_list.before_begin(), the_list);
 
   if (glyphs_height < height) glyphs_height = height;
   if (line_height_factor < fmt.line_height_factor) line_height_factor = fmt.line_height_factor;
   line_width += width;
 
-  for (auto * entry : *the_list) {
-    display_list_entry_pool.deleteElement(entry);
-  }
-  the_list->clear();
-  delete the_list;
+  // (no post-splice cleanup needed — splice_after empties the_list,
+  // and its stack-local forward_list destructor handles the now-empty
+  // internal node storage on function return. The previous code's
+  // deleteElement loop ran zero iterations and was a silent no-op.)
 
   return true;
 }
@@ -971,12 +984,15 @@ Page::add_image(Image & image, const Format & fmt /*, bool at_start_of_page*/)
 }
 
 void
-Page::add_text(std::string str, const Format & fmt)
+Page::add_text(const std::string & str, const Format & fmt)
 {
   Format myfmt = fmt;
 
-  char * buff = new char[100];
-  if (buff == nullptr) msg_viewer.out_of_memory("temp buffer allocation");
+  // Stack buffer instead of `new char[100]` — this routine is invoked
+  // from cover/title rendering and a few other one-shot paths, so
+  // each call paid a heap round-trip for 100 bytes that fit trivially
+  // on the stack.
+  char buff[100];
   const char *s = str.c_str();
   while (*s) {
     if (uint8_t(*s) <= ' ') {
@@ -988,13 +1004,13 @@ Page::add_text(std::string str, const Format & fmt)
     }
     else {
       int16_t count = 0;
-      while (uint8_t(*s) > ' ') { buff[count++] = *s++; }
+      while (uint8_t(*s) > ' ' && count < (int16_t)(sizeof(buff) - 1)) {
+        buff[count++] = *s++;
+      }
       buff[count] = 0;
       if (!add_word(buff, myfmt)) break;
     }
   }
-
-  delete [] buff;
 }
 
 void 

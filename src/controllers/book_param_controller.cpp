@@ -14,9 +14,12 @@
 #include "models/config.hpp"
 #include "models/page_locs.hpp"
 #include "models/toc.hpp"
+#include "models/wake_snapshot.hpp"
 #include "viewers/menu_viewer.hpp"
 #include "viewers/form_viewer.hpp"
 #include "viewers/msg_viewer.hpp"
+#include "viewers/book_viewer.hpp"
+#include "viewers/page_nav_viewer.hpp"
 
 #if EPUB_INKPLATE_BUILD && !BOARD_TYPE_PAPER_S3
   #include "esp_system.h"
@@ -120,10 +123,17 @@ revert_to_defaults()
   book_params->put(BookParams::Ident::FONT_SIZE,         default_value);
   book_params->put(BookParams::Ident::FONT,              default_value);
   book_params->put(BookParams::Ident::USE_FONTS_IN_BOOK, default_value);
-  
+
   epub.update_book_format_params();
 
   book_params->save();
+
+  // Format params changed: any cached wake snapshot now reflects an
+  // outdated layout. Drop both the in-memory and on-disk copies so
+  // the next wake takes the normal boot rendering path instead of
+  // flashing the stale snapshot for ~2-4 s before the real render
+  // overwrites it.
+  wake_snapshot.invalidate();
 
   msg_viewer.show(MsgViewer::MsgType::INFO, 
                   false, false, 
@@ -189,21 +199,44 @@ wifi_mode()
 static void
 power_off()
 {
-  books_dir_controller.save_last_book(book_controller.get_current_page_id(), true); 
-  
+  books_dir_controller.save_last_book(book_controller.get_current_page_id(), true);
+
   CommonActions::power_it_off();
+}
+
+static void
+jump_to_page()
+{
+  int16_t page_count = page_locs.get_page_count();
+
+  if (page_count <= 0) {
+    msg_viewer.show(MsgViewer::MsgType::INFO,
+                    false, false,
+                    "Jump to Page",
+                    "Pages are still being computed. Please wait.");
+    return;
+  }
+
+  // Get current page for default value (1-based for the viewer)
+  const PageLocs::PageId & current_page_id = book_controller.get_current_page_id();
+  int16_t current_page = page_locs.get_page_nbr(current_page_id);
+  uint16_t start_page = (current_page >= 0) ? static_cast<uint16_t>(current_page + 1) : 1;
+
+  page_nav_viewer.show(start_page, static_cast<uint16_t>(page_count), "Jump to Page");
+  book_param_controller.set_page_nav_is_shown();
 }
 
 // IMPORTANT!!
 // The first (menu[0]) and the last menu entry (the one before END_MENU) MUST ALWAYS BE VISIBLE!!!
 
-static MenuViewer::MenuEntry menu[10] = {
+static MenuViewer::MenuEntry menu[11] = {
   { MenuViewer::Icon::RETURN,      "Return to the e-books reader",         CommonActions::return_to_last, true , true },
   { MenuViewer::Icon::TOC,         "Table of Content",                     toc_ctrl                     , false, true },
+  { MenuViewer::Icon::BOOK,        "Jump to Page Number",                  jump_to_page                 , true , true },
   { MenuViewer::Icon::BOOK_LIST,   "E-Books list",                         books_list                   , true , true },
   { MenuViewer::Icon::FONT_PARAMS, "Current e-book parameters",            book_parameters              , true , true },
   { MenuViewer::Icon::REVERT,      "Revert e-book parameters to "
-                                   "default values",                       revert_to_defaults           , true , true },  
+                                   "default values",                       revert_to_defaults           , true , true },
   { MenuViewer::Icon::DELETE,      "Delete the current e-book",            delete_book                  , true , true },
   { MenuViewer::Icon::WIFI,        "WiFi Access to the e-books folder",    wifi_mode                    , true , true },
   { MenuViewer::Icon::INFO,        "About the EPub-InkPlate application",  CommonActions::about         , true , true },
@@ -245,7 +278,14 @@ BookParamController::input_event(const EventMgr::Event & event)
         if (font              !=              old_font) book_params->put(BookParams::Ident::FONT,               font             );
         if (use_fonts_in_book != old_use_fonts_in_book) book_params->put(BookParams::Ident::USE_FONTS_IN_BOOK,  use_fonts_in_book);
         
-        if (book_params->is_modified()) epub.update_book_format_params();
+        if (book_params->is_modified()) {
+          page_locs.stop_document();
+          epub.update_book_format_params();
+          // See revert_to_defaults above: format-param edits make
+          // the snapshot's layout obsolete. Drop it so warm wake
+          // takes the normal boot path instead of painting stale.
+          wake_snapshot.invalidate();
+        }
 
         book_params->save();
 
@@ -264,6 +304,33 @@ BookParamController::input_event(const EventMgr::Event & event)
         }
      // }
       menu_viewer.clear_highlight();
+    }
+  }
+  else if (page_nav_is_shown) {
+    if (!page_nav_viewer.event(event)) {
+      page_nav_is_shown = false;
+
+      if (!page_nav_viewer.was_canceled()) {
+        // Convert from 1-based UI to 0-based internal page number
+        int16_t target_page_nbr = static_cast<int16_t>(page_nav_viewer.get_value()) - 1;
+
+        const PageLocs::PageId * target_page_id = page_locs.get_page_id_from_page_nbr(target_page_nbr);
+
+        if (target_page_id != nullptr) {
+          book_controller.set_current_page_id(*target_page_id);
+          app_controller.set_controller(AppController::Ctrl::BOOK);
+        }
+        else {
+          msg_viewer.show(MsgViewer::MsgType::INFO,
+                          false, false,
+                          "Jump to Page",
+                          "Page %d could not be found.",
+                          page_nav_viewer.get_value());
+        }
+      }
+      else {
+        menu_viewer.show(menu);
+      }
     }
   }
   else if (delete_current_book) {

@@ -438,9 +438,13 @@ Screen::draw_glyph(
   }
 }
 
-void 
-Screen::setup(PixelResolution resolution, Orientation orientation)
+void
+Screen::setup(PixelResolution resolution, Orientation orientation,
+              bool preserve_panel_image)
 {
+  // Inkplate boards have no PaperS3-style power-cycle deep sleep, so
+  // the warm-wake hint is unused here — accepted only for API parity.
+  (void)preserve_panel_image;
   set_orientation(orientation);
   set_pixel_resolution(resolution, true);
   clear();

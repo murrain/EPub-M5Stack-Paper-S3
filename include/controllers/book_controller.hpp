@@ -31,6 +31,13 @@ class BookController
     static constexpr char const * TAG = "BookController";
 
     PageLocs::PageId current_page_id;
+
+    // Wraps book_viewer.show_page + WakeSnapshot::capture so the
+    // renderer stays decoupled from the books_dir / wake-snapshot
+    // subsystems. Every navigation handler in this file should go
+    // through here rather than calling book_viewer.show_page
+    // directly — that's what keeps the capture coverage complete.
+    void show_and_capture(const PageLocs::PageId & page_id);
 };
 
 #if __BOOK_CONTROLLER__

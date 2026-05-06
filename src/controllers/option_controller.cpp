@@ -22,6 +22,11 @@
   #include "esp_system.h"
 #endif
 
+#if EPUB_INKPLATE_BUILD && defined(BOARD_TYPE_PAPER_S3)
+  #include "usb_msc_paper_s3.hpp"
+  #include "viewers/usb_msc_viewer.hpp"
+#endif
+
 // static int8_t boolean_value;
 
 static Screen::Orientation     orientation;
@@ -189,11 +194,11 @@ default_parameters()
 static void
 wifi_mode()
 {
-  #if EPUB_INKPLATE_BUILD  
+  #if EPUB_INKPLATE_BUILD
     epub.close_file();
     fonts.clear(true);
     fonts.clear_glyph_caches();
-    
+
     event_mgr.set_stay_on(true); // DO NOT sleep
 
     if (start_web_server()) {
@@ -201,6 +206,53 @@ wifi_mode()
     }
   #endif
 }
+
+#if EPUB_INKPLATE_BUILD && defined(BOARD_TYPE_PAPER_S3)
+static void
+usb_drive_mode()
+{
+  // Same teardown shape as wifi_mode: close the active book, free
+  // the font caches, prevent idle-sleep so the host doesn't lose
+  // the device mid-transfer.
+  epub.close_file();
+  fonts.clear(true);
+  fonts.clear_glyph_caches();
+
+  event_mgr.set_stay_on(true);
+
+  // Render the "USB Drive Mode" banner BEFORE handing the SD over
+  // to TinyUSB. After UsbMsc::start() the FATFS overlay is gone so
+  // we lose access to fonts/wallpapers on the card — but the panel
+  // image is already latched and stays visible for the entire
+  // duration of the host connection thanks to e-ink retention.
+  UsbMscViewer::show();
+
+  if (UsbMsc::start()) {
+    option_controller.set_wait_for_key_after_usb();
+  } else {
+    // Surface the specific failure step + esp_err_t on the alert
+    // dialog so the user can diagnose without a serial monitor.
+    // Without this, every USB-side init failure looks identical,
+    // and field debugging requires a wired-up host.
+    const char * step;
+    switch (UsbMsc::last_error()) {
+      case UsbMsc::StartError::NO_SD_CARD:
+        step = "no SD card mounted"; break;
+      case UsbMsc::StartError::NEW_STORAGE_SDMMC_FAILED:
+        step = "tinyusb_msc_new_storage_sdmmc"; break;
+      case UsbMsc::StartError::DRIVER_INSTALL_FAILED:
+        step = "tinyusb_driver_install"; break;
+      default:
+        step = "unknown"; break;
+    }
+    msg_viewer.show(MsgViewer::MsgType::ALERT, false, true,
+                    "USB Drive Mode failed",
+                    "Init failed at: %s (esp_err=%d). The device will "
+                    "continue normally; please try again.",
+                    step, UsbMsc::last_error_code());
+  }
+}
+#endif
 
 static void
 init_nvs()
@@ -335,6 +387,9 @@ static MenuViewer::MenuEntry menu[] = {
   { MenuViewer::Icon::MAIN_PARAMS,   "Main parameters",                      main_parameters                  , true,  true  },
   { MenuViewer::Icon::FONT_PARAMS,   "Default e-books parameters",           default_parameters               , true,  true  },
   { MenuViewer::Icon::WIFI,          "WiFi Access to the e-books folder",    wifi_mode                        , true,  true  },
+  #if EPUB_INKPLATE_BUILD && defined(BOARD_TYPE_PAPER_S3)
+    { MenuViewer::Icon::USB_DRIVE,   "USB Drive Mode (mount SD on computer)", usb_drive_mode                   , true,  true  },
+  #endif
   { MenuViewer::Icon::REFRESH,       "Refresh the e-books list",             CommonActions::refresh_books_dir , true,  true  },
   #if !(INKPLATE_6PLUS || MENU_6PLUS)
     { MenuViewer::Icon::CLR_HISTORY, "Clear e-books' read history",          init_nvs                         , true,  true  },
@@ -457,6 +512,7 @@ OptionController::input_event(const EventMgr::Event & event)
 
         if ((old_orientation != orientation) ||
             (old_show_title  != show_title )) {
+          page_locs.stop_document();
           epub.update_book_format_params();
         }
 
@@ -488,7 +544,8 @@ OptionController::input_event(const EventMgr::Event & event)
             (old_font_size          != font_size         ) ||
             (old_default_font       != default_font      ) ||
             (old_use_fonts_in_books != use_fonts_in_books)) {
-          epub.update_book_format_params();  
+          page_locs.stop_document();
+          epub.update_book_format_params();
         }
 
         if (old_default_font != default_font) {
@@ -518,9 +575,9 @@ OptionController::input_event(const EventMgr::Event & event)
 
   #if EPUB_INKPLATE_BUILD
     else if (wait_for_key_after_wifi) {
-      msg_viewer.show(MsgViewer::MsgType::INFO, 
-                      false, true, 
-                      "Restarting", 
+      msg_viewer.show(MsgViewer::MsgType::INFO,
+                      false, true,
+                      "Restarting",
                       "The device is now restarting. Please wait.");
       wait_for_key_after_wifi = false;
       stop_web_server();
@@ -530,6 +587,22 @@ OptionController::input_event(const EventMgr::Event & event)
         books_dir.refresh(nullptr, dummy, true);
       }
       esp_restart();
+    }
+  #endif
+
+  #if EPUB_INKPLATE_BUILD && defined(BOARD_TYPE_PAPER_S3)
+    else if (wait_for_key_after_usb) {
+      // Don't try to do graceful TinyUSB teardown — the host may be
+      // mid-write. exit_via_restart shows a "Restarting" splash and
+      // calls esp_restart(); the next boot mounts a fresh FATFS and
+      // picks up any newly-uploaded files via the standard refresh.
+      msg_viewer.show(MsgViewer::MsgType::INFO,
+                      false, true,
+                      "Restarting",
+                      "Disconnecting USB drive. Please wait.");
+      wait_for_key_after_usb = false;
+      UsbMsc::exit_via_restart();
+      // Unreachable; exit_via_restart is [[noreturn]].
     }
   #endif
 

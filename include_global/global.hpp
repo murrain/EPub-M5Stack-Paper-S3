@@ -37,8 +37,9 @@
   #define LOG_LOCAL_LEVEL EPUB_LOG_LEVEL
 #endif
 
-#define FONTS_FOLDER MAIN_FOLDER "/fonts"
-#define BOOKS_FOLDER MAIN_FOLDER "/books"
+#define FONTS_FOLDER      MAIN_FOLDER "/fonts"
+#define BOOKS_FOLDER      MAIN_FOLDER "/books"
+#define WALLPAPERS_FOLDER MAIN_FOLDER "/wallpapers"
 
 #ifndef DEBUGGING
   #define DEBUGGING 0

@@ -10,6 +10,7 @@
 #include "models/books_dir.hpp"
 #include "models/config.hpp"
 #include "models/nvs_mgr.hpp"
+#include "models/session_state.hpp"
 #include "viewers/book_viewer.hpp"
 #include "viewers/linear_books_dir_viewer.hpp"
 #include "viewers/matrix_books_dir_viewer.hpp"
@@ -33,12 +34,26 @@ BooksDirController::setup()
   book_page_id.itemref_index = -1;
   book_page_id.offset        = -1;
   book_was_shown             = false;
+  refresh_deferred           = false;
 
-  
+
   #if EPUB_INKPLATE_BUILD
 
     int16_t dummy;
-    if (!books_dir.read_books_directory(nullptr, dummy)) {
+    // On warm wake, defer the SD-side directory refresh — the user
+    // is going straight back to their book and the cached DB from
+    // the previous session is accurate. The refresh fires lazily on
+    // first navigation back to the books directory (see enter()).
+    // On cold boot read_books_directory does the full refresh inline,
+    // so a stale cache cannot accumulate across power cycles — every
+    // cold boot is a natural catch-up point.
+    const bool skip_refresh = SessionState::is_warm_wake();
+    refresh_deferred = skip_refresh;
+    if (skip_refresh) {
+      LOG_I("Warm wake: deferring books-dir refresh until first dir-enter");
+    }
+
+    if (!books_dir.read_books_directory(nullptr, dummy, skip_refresh)) {
       LOG_E("There was issues reading books directory.");
     }
     else {
@@ -202,16 +217,35 @@ BooksDirController::enter()
   log('I', TAG,
       "BooksDirController enter: viewer=%s (id=%d) screen=%dx%d",
       view, viewer_id, Screen::get_width(), Screen::get_height());
-  books_dir_viewer = (viewer_id == LINEAR_VIEWER) ? (BooksDirViewer *) &linear_books_dir_viewer : 
+  books_dir_viewer = (viewer_id == LINEAR_VIEWER) ? (BooksDirViewer *) &linear_books_dir_viewer :
                                         (BooksDirViewer *) &matrix_books_dir_viewer;
 
   books_dir_viewer->setup();
   screen.force_full_update();
-  
+
   if (book_was_shown && (last_read_book_index != -1)) {
+    // Warm-wake auto-resume path: jump straight to the user's
+    // book. Do NOT flush the deferred refresh here — that would
+    // run the SD-side directory scan synchronously on the resume
+    // path and defeat the entire point of the deferral. The
+    // refresh fires on the FIRST manual navigation back to the
+    // directory (the else branch below) which is the natural
+    // moment we owe the user a fresh listing.
     show_last_book();
   }
   else {
+    // The user is actually looking at the directory. Flush any
+    // deferred refresh from a warm-wake setup() before drawing
+    // the page so the listing is up to date.
+    if (refresh_deferred) {
+      LOG_I("Flushing deferred books-dir refresh");
+      int16_t dummy;
+      if (!books_dir.refresh(nullptr, dummy)) {
+        LOG_E("Deferred books-dir refresh failed");
+      }
+      refresh_deferred = false;
+    }
+
     if (current_book_index == -1) current_book_index = 0;
     current_book_index = books_dir_viewer->show_page_and_highlight(current_book_index);
   }

@@ -278,7 +278,11 @@ void MsgViewer::show_progress(const char * title, ...)
   dot_zone.max_dot_count = dot_zone.dots_per_line * ((dot_zone.dim.height + 1) / 9);
   dot_count = 0;
 
-  page.paint(false);
+  // Progress-spinner setup is a transient overlay; FAST refresh
+  // (MODE_DU) puts it on screen ~3x faster than the BUDGETED
+  // GL16 path. Subsequent add_dot() calls (the actual progress
+  // ticks) already use FAST via line 331 below.
+  page.paint(Screen::UpdateMode::FAST, false);
 }
 
 void MsgViewer::add_dot()
@@ -328,7 +332,11 @@ void MsgViewer::add_dot()
 
   dot_count++;
 
-  page.paint(false, true, true);
+  // Per-dot progress tick. FAST mode (MODE_DU) is ideal for these
+  // tiny single-dot updates — the previous explicit "no_full" bool
+  // routed to GL16 (~450 ms per dot, which on a long progress
+  // operation totalled multiple seconds of cumulative refresh).
+  page.paint(Screen::UpdateMode::FAST, true, true);
 }
 #endif
 

@@ -156,7 +156,16 @@ class BooksDir
      * @return true  The database has been updated and ready.
      * @return false Some error happened.
      */
-    bool read_books_directory(char * book_filename, int16_t & book_index);
+    /// Read the books directory from disk. When `skip_refresh` is
+    /// true, the on-disk DB is opened and version-checked but the
+    /// directory scan + per-file metadata refresh is deferred. Used
+    /// by the warm-wake fast path so the user sees their book within
+    /// a fraction of a second instead of waiting for the SD-side
+    /// stat()/parse pass to complete. Callers that take the fast
+    /// path are responsible for triggering refresh() later (see
+    /// BooksDirController::enter for the dir-navigation hook).
+    bool read_books_directory(char * book_filename, int16_t & book_index,
+                              bool skip_refresh = false);
 
     /**
      * @brief Refresh the database

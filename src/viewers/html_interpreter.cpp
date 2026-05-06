@@ -423,8 +423,18 @@ HTMLInterpreter::build_pages_recurse(xml_node       node,
               to_be_started = false;
               page.new_paragraph(fmt, true);
             }       
-            std::string word;
-            word.assign(w, count);
+            // Member buffer instead of std::string: every word's count
+            // > 15 (SSO threshold on most STLs) was forcing a heap
+            // allocation purely to add a null terminator. With ~400
+            // words per page that's 400 mallocs+frees of small
+            // strings, churning the heap for no purpose. The hard
+            // ceiling matches the existing "WORD TOO LARGE" guard.
+            // word_buf is a class member (see html_interpreter.hpp)
+            // so it doesn't grow the recursive stack frame.
+            int16_t cb = count;
+            if (cb >= (int16_t)sizeof(word_buf)) cb = sizeof(word_buf) - 1;
+            memcpy(word_buf, w, cb);
+            word_buf[cb] = '\0';
 
             #if EPUB_INKPLATE_BUILD && (LOG_LOCAL_LEVEL == ESP_LOG_VERBOSE)
               static bool first = true;
@@ -434,7 +444,7 @@ HTMLInterpreter::build_pages_recurse(xml_node       node,
               }
             #endif
 
-            if (!page.add_word(word.c_str(), fmt)) {
+            if (!page.add_word(word_buf, fmt)) {
               if (!page_end(fmt)) return false;
               if (at_end()) {
                 page.break_paragraph(fmt);
@@ -443,7 +453,7 @@ HTMLInterpreter::build_pages_recurse(xml_node       node,
               show_state("==> New Paragraph 3 <==", fmt);
               page.new_paragraph(fmt, true);
               show_state("==> After New Paragraph 3 <==", fmt);
-              page.add_word(word.c_str(), fmt);
+              page.add_word(word_buf, fmt);
             }
           }
           current_offset += count;

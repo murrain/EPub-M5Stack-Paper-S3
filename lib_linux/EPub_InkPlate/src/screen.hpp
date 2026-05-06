@@ -39,6 +39,7 @@ class Screen : NonCopyable
     void       colorize_region(Dim dim, Pos pos, uint8_t color);
     void                 clear();
     void                update(bool no_full = false); // Parameter only used by the InkPlate version
+    void           panel_clear() {}                  // No-op on Linux (no e-ink panel)
     void                  test();
 
   private:
@@ -66,8 +67,9 @@ class Screen : NonCopyable
 
   public:
     static Screen &               get_singleton() noexcept { return singleton; }
-    void                                  setup(PixelResolution resolution, 
-                                                Orientation     orientation);
+    void                                  setup(PixelResolution resolution,
+                                                Orientation     orientation,
+                                                bool            preserve_panel_image = false);
     void                   set_pixel_resolution(PixelResolution resolution, bool force = false);
     void                        set_orientation(Orientation orient);
     inline PixelResolution get_pixel_resolution() { return pixel_resolution; }

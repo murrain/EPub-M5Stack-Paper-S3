@@ -30,6 +30,20 @@ class Screen : NonCopyable
     enum class Orientation     : int8_t { LEFT, RIGHT, BOTTOM, TOP };
     enum class PixelResolution : int8_t { ONE_BIT, THREE_BITS };
 
+    /**
+     * @brief Screen update waveform-mode discipline.
+     *
+     * Selects which epdiy waveform the renderer wants for a given paint.
+     * BUDGETED is the historical default (GL16 with periodic forced GC16
+     * cleanups). FAST routes to MODE_DU on PaperS3 for fast text page turns.
+     */
+    enum class UpdateMode : int8_t {
+      BUDGETED,       ///< Default behavior: GL16 with budget-driven forced GC16 (was no_full=false)
+      FORCE_PARTIAL,  ///< Always GL16, resets budget (was no_full=true)
+      FULL,           ///< Always GC16, resets budget
+      FAST,           ///< PaperS3: MODE_DU. Inkplate: partial_update fallback (no MODE_DU available)
+    };
+
     void          draw_bitmap(const unsigned char * bitmap_data, Dim dim, Pos pos);
     void           draw_glyph(const unsigned char * bitmap_data, Dim dim, Pos pos, uint16_t pitch);
     void       draw_rectangle(Dim dim, Pos pos, uint8_t color);
@@ -37,11 +51,14 @@ class Screen : NonCopyable
     void      colorize_region(Dim dim, Pos pos, uint8_t color);
 
     void clear();
-    void update(bool no_full = false);
+    void update(UpdateMode mode);
+    inline void update(bool no_full = false) {
+      update(no_full ? UpdateMode::FORCE_PARTIAL : UpdateMode::BUDGETED);
+    }
 
   private:
     static constexpr char const * TAG = "Screen";
-    
+
     static uint16_t width;
     static uint16_t height;
 
@@ -54,12 +71,34 @@ class Screen : NonCopyable
 
   public:
     static Screen & get_singleton() noexcept { return singleton; }
-    void setup(PixelResolution resolution, Orientation orientation);
+    /// Initialize the e-paper hardware. When `preserve_panel_image` is
+    /// true the boot-time epd_fullclear (a ~700ms clearing waveform that
+    /// drives the panel back to all-white) and the framebuffer wipe are
+    /// both skipped, leaving whatever image is currently latched on the
+    /// physical panel intact. Used on warm wake from deep sleep so the
+    /// sleep-screen / wallpaper drawn before sleep stays visible during
+    /// boot until the application replaces it with real content.
+    void setup(PixelResolution resolution, Orientation orientation,
+               bool preserve_panel_image = false);
     void set_pixel_resolution(PixelResolution resolution, bool force = false);
     void set_orientation(Orientation orient);
     inline Orientation get_orientation() { return orientation; }
     inline PixelResolution get_pixel_resolution() { return pixel_resolution; }
     void force_full_update();
+    // Drive the panel through its full-clear waveform and reset the
+    // framebuffer to all-white. Use before sleep-screen rendering to
+    // eliminate residual ghosting from the previous book page.
+    void panel_clear();
+
+    // Raw panel-framebuffer accessors. The buffer is 4-bit packed
+    // grayscale at the panel's physical landscape dimensions
+    // (960x540 on PaperS3), regardless of the logical orientation
+    // set via set_orientation. Returns nullptr/0 before
+    // screen.setup has run. Currently used by WakeSnapshot for
+    // save/restore; the contract belongs to the provider, so the
+    // name doesn't reference any specific consumer.
+    uint8_t * get_panel_framebuffer();
+    size_t    get_panel_framebuffer_size();
 
     inline static uint16_t get_width() { return width; }
     inline static uint16_t get_height() { return height; }
@@ -88,6 +127,21 @@ class Screen : NonCopyable
     enum class Orientation     : int8_t { LEFT, RIGHT, BOTTOM, TOP };
     enum class PixelResolution : int8_t { ONE_BIT, THREE_BITS };
 
+    /**
+     * @brief Screen update waveform-mode discipline.
+     *
+     * Selects which waveform the renderer wants for a given paint. BUDGETED
+     * is the historical default (partial updates with periodic forced full
+     * cleanups). FAST has no MODE_DU equivalent on Inkplate hardware, so it
+     * falls back to a partial update.
+     */
+    enum class UpdateMode : int8_t {
+      BUDGETED,       ///< Default behavior: partial with budget-driven forced full (was no_full=false)
+      FORCE_PARTIAL,  ///< Always partial, resets budget (was no_full=true)
+      FULL,           ///< Always full update, resets budget
+      FAST,           ///< Inkplate: same as FORCE_PARTIAL (no MODE_DU available)
+    };
+
     void          draw_bitmap(const unsigned char * bitmap_data, Dim dim, Pos pos);
     void           draw_glyph(const unsigned char * bitmap_data, Dim dim, Pos pos, uint16_t pitch);
     void       draw_rectangle(Dim dim, Pos pos, uint8_t color);
@@ -98,35 +152,48 @@ class Screen : NonCopyable
     void low_colorize_3bit(Dim dim, Pos pos, uint8_t color);
 
     inline void clear()  {
-      if (pixel_resolution == PixelResolution::ONE_BIT) { 
+      if (pixel_resolution == PixelResolution::ONE_BIT) {
         frame_buffer_1bit->clear();
       }
       else {
         frame_buffer_3bit->clear();
-      } 
+      }
     }
-    
-    inline void update(bool no_full = false) { 
+
+    inline void update(UpdateMode mode) {
       if (pixel_resolution == PixelResolution::ONE_BIT) {
-        if (no_full) {
-          e_ink.partial_update(*frame_buffer_1bit);
-          partial_count = 0;
-        }
-        else {
-          if (partial_count <= 0) {
-            //e_ink.clean();
+        switch (mode) {
+          case UpdateMode::FULL:
             e_ink.update(*frame_buffer_1bit);
             partial_count = PARTIAL_COUNT_ALLOWED;
-          }
-          else {
+            break;
+          case UpdateMode::FORCE_PARTIAL:
+          case UpdateMode::FAST:
+            // No MODE_DU on Inkplate; FAST falls back to a partial update.
             e_ink.partial_update(*frame_buffer_1bit);
-            partial_count--;
-          }
+            partial_count = 0;
+            break;
+          case UpdateMode::BUDGETED:
+          default:
+            if (partial_count <= 0) {
+              //e_ink.clean();
+              e_ink.update(*frame_buffer_1bit);
+              partial_count = PARTIAL_COUNT_ALLOWED;
+            }
+            else {
+              e_ink.partial_update(*frame_buffer_1bit);
+              partial_count--;
+            }
+            break;
         }
       }
       else {
         e_ink.update(*frame_buffer_3bit);
       }
+    }
+
+    inline void update(bool no_full = false) {
+      update(no_full ? UpdateMode::FORCE_PARTIAL : UpdateMode::BUDGETED);
     }
 
   private:
@@ -153,12 +220,23 @@ class Screen : NonCopyable
 
   public:
     static Screen & get_singleton() noexcept { return singleton; }
-    void setup(PixelResolution resolution, Orientation orientation);
+    /// `preserve_panel_image` is honored on PaperS3 only — Inkplate
+    /// boards always run their normal init path. The parameter has a
+    /// default so existing call sites (orientation change, etc.) need
+    /// no edits.
+    void setup(PixelResolution resolution, Orientation orientation,
+               bool preserve_panel_image = false);
     void set_pixel_resolution(PixelResolution resolution, bool force = false);
     void set_orientation(Orientation orient);
     inline Orientation get_orientation() { return orientation; }
     inline PixelResolution get_pixel_resolution() { return pixel_resolution; }
     inline void force_full_update() { partial_count = 0; }
+
+    // Inkplate boards have no equivalent fast-wake story (no PMU
+    // power-cut), so the WakeSnapshot module no-ops by returning
+    // a null framebuffer here.
+    inline uint8_t * get_panel_framebuffer() { return nullptr; }
+    inline size_t    get_panel_framebuffer_size() { return 0; }
 
     #if INKPLATE_6PLUS
       void to_user_coord(uint16_t & x, uint16_t & y);

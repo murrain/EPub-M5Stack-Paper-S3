@@ -8,10 +8,24 @@
 
 #include "esp_err.h"
 #include "esp_vfs_fat.h"
+#include "esp_sleep.h"
 #include "driver/sdmmc_types.h"
 #include "driver/sdspi_host.h"
 #include "driver/spi_common.h"
+#include "driver/gpio.h"
 #include "sdmmc_cmd.h"
+
+extern "C" {
+  #include <epdiy.h>
+}
+
+// GT911 capacitive-touch INT line per the official M5Stack PaperS3
+// PinMap (https://docs.m5stack.com/en/core/papers3 -> PinMap section).
+// On ESP32-S3, GPIOs 0-21 are RTC-capable; GPIO 48 is NOT, so this
+// pin can be used as a wake source for *light* sleep only. Deep sleep
+// on this board exits exclusively via the hardware power button, which
+// the PMS150 PMU handles as a full reset / cold boot.
+static constexpr gpio_num_t GT911_INT_GPIO = GPIO_NUM_48;
 
 InkPlatePlatform InkPlatePlatform::singleton;
 InkPlatePlatform & inkplate_platform = InkPlatePlatform::get_singleton();
@@ -67,23 +81,74 @@ bool InkPlatePlatform::setup(bool sd_card_init)
   return true;
 }
 
-bool InkPlatePlatform::light_sleep(uint32_t minutes_to_sleep, gpio_num_t gpio_num, int level)
+bool InkPlatePlatform::light_sleep(uint32_t minutes_to_sleep, gpio_num_t /*gpio_num*/, int /*level*/)
 {
-  // TODO: Implement proper light sleep with GPIO + timer wake.
-  (void)minutes_to_sleep;
-  (void)gpio_num;
-  (void)level;
-  LOG_I("Paper S3 light_sleep stub; not sleeping (minutes=%u)", minutes_to_sleep);
-  return false;
+  // Configure the GT911 INT line as a level-triggered wake source.
+  // The GT911 holds the INT line low while a touch is in progress and
+  // pulses it briefly on touch events. Any low level wakes the chip.
+  gpio_set_direction(GT911_INT_GPIO, GPIO_MODE_INPUT);
+  gpio_pullup_en(GT911_INT_GPIO);
+  gpio_pulldown_dis(GT911_INT_GPIO);
+  esp_sleep_enable_gpio_wakeup();
+  gpio_wakeup_enable(GT911_INT_GPIO, GPIO_INTR_LOW_LEVEL);
+
+  // Optional timer wake. Disabled when minutes_to_sleep == 0 so the
+  // device sleeps until touched. Useful for the auto-idle path that
+  // wants periodic wake to refresh the battery indicator.
+  if (minutes_to_sleep > 0) {
+    uint64_t us = (uint64_t)minutes_to_sleep * 60ull * 1000000ull;
+    esp_sleep_enable_timer_wakeup(us);
+  }
+
+  LOG_I("Paper S3 entering light sleep (touch wake on GPIO %d, timer=%u min)",
+        (int)GT911_INT_GPIO, (unsigned)minutes_to_sleep);
+
+  esp_light_sleep_start();
+
+  esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+  gpio_wakeup_disable(GT911_INT_GPIO);
+
+  // Disarm both wake sources so they don't carry over to the next
+  // light_sleep call. Without this the timer wakeup stays armed,
+  // and the residual time from the prior arm can fire spuriously
+  // on the next sleep entry — the user would see the device escalate
+  // to deep_sleep without actually being idle.
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
+
+  LOG_I("Paper S3 woke from light sleep (cause=%d)", (int)cause);
+  // Match the existing caller semantics in event_mgr / touch_event_mgr:
+  //   true  → timer expired (caller escalates to deep_sleep)
+  //   false → GPIO touch wake (caller resumes normal operation)
+  return cause == ESP_SLEEP_WAKEUP_TIMER;
 }
 
-void InkPlatePlatform::deep_sleep(gpio_num_t gpio_num, int level)
+void InkPlatePlatform::deep_sleep(gpio_num_t /*gpio_num*/, int /*level*/)
 {
-  // TODO: Implement proper deep sleep configuration. For now,
-  // just log and return so we can keep debugging.
-  (void)gpio_num;
-  (void)level;
-  LOG_I("Paper S3 deep_sleep stub; not sleeping (gpio=%d, level=%d)", (int)gpio_num, level);
+  LOG_I("Paper S3 entering deep sleep (wake via hardware power button)");
+
+  // Power down the e-paper rail. The image already on the panel stays
+  // visible without power (e-ink physics) — whatever the caller drew
+  // before invoking deep_sleep remains the visible state until wake.
+  epd_poweroff();
+
+  // No software wake source — GT911 INT lives on GPIO 48 which is NOT
+  // RTC-capable on ESP32-S3, so it cannot fire ext0/ext1 wake. The
+  // only way out of deep sleep on this board is the hardware power
+  // button, which the PMS150 PMU drives as a cold reset.
+  //
+  // The BM8563 RTC chip's INT line is wired through PMS150, not to
+  // any ESP32 GPIO, so RTC alarms also wake via the PMU reset path
+  // (effectively a cold boot at the alarm time). RTC alarm wake is
+  // not configured here — left as a future enhancement.
+
+  esp_deep_sleep_start();
+  // Never returns.
+}
+
+sdmmc_card_t * InkPlatePlatform::get_sd_card()
+{
+  return s_sd_card;
 }
 
 #endif // BOARD_TYPE_PAPER_S3

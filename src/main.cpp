@@ -17,8 +17,13 @@
   #include "models/epub.hpp"
   #include "models/config.hpp"
   #include "models/nvs_mgr.hpp"
+  #include "models/session_state.hpp"
+  #include "models/wake_snapshot.hpp"
   #include "screen.hpp"
   #include "inkplate_platform.hpp"
+  #if defined(BOARD_TYPE_PAPER_S3)
+    #include "battery_paper_s3.hpp"
+  #endif
   #include "helpers/unzip.hpp"
   #include "viewers/msg_viewer.hpp"
   #include "pugixml.hpp"
@@ -38,12 +43,18 @@
 
   static constexpr char const * TAG = "main";
 
-  void 
-  mainTask(void * params) 
+  void
+  mainTask(void * params)
   {
     LOG_I("EPub-Inkplate Startup.");
-    
+
     bool nvs_mgr_res = nvs_mgr.setup();
+
+    // Read the deep-sleep marker very early so all later boot-path code
+    // can branch on SessionState::is_warm_wake(). The marker is consumed
+    // (cleared) on read so any crash mid-boot defaults the next attempt
+    // to a safe cold-boot path.
+    SessionState::init_at_boot();
 
     #if DEBUGGING
       for (int i = 10; i > 0; i--) {
@@ -66,6 +77,12 @@
     #else
       bool inkplate_err = !inkplate_platform.setup(true);
       if (inkplate_err) LOG_E("InkPlate6Ctrl Error.");
+
+      #if defined(BOARD_TYPE_PAPER_S3)
+        if (!battery.setup()) {
+          LOG_E("Battery monitor setup failed; level reads will return 0.");
+        }
+      #endif
 
       bool config_err = !config.read();
 
@@ -113,7 +130,7 @@
       #endif
 
       if (fonts.setup()) {
-        
+
         Screen::Orientation    orientation;
         Screen::PixelResolution resolution;
         config.get(Config::Ident::ORIENTATION,      (int8_t *) &orientation);
@@ -126,7 +143,46 @@
           config.get(Config::Ident::PIXEL_RESOLUTION, (int8_t *) &resolution);
         #endif
 
-        screen.setup(resolution, orientation);
+        // On warm wake the panel still latches the sleep-screen image
+        // from before deep sleep — keep it visible by skipping the
+        // ~700 ms boot epd_fullclear.
+        screen.setup(resolution, orientation,
+                     /*preserve_panel_image=*/SessionState::is_warm_wake());
+
+        // Warm-wake fast path: paint the cached snapshot (the book
+        // page the user was last viewing) onto the panel before the
+        // remaining boot work runs. The synchronous boot path that
+        // follows — fonts.setup, page_locs.setup, books_dir scan,
+        // app_controller.start - takes another 2-4 s; without this
+        // the user stares at a (clearing) wallpaper that whole time.
+        // With this they see their book essentially immediately, can
+        // read while the rest of boot completes, and only experience
+        // a brief input-dead window (current_ctrl is still NONE so
+        // taps/swipes harmlessly drop until app_controller.start
+        // assigns the BOOK controller).
+        //
+        // restore_to_panel arms screen.update internally which fires
+        // the s_force_full + s_warm_wake_clear_pending fullclear+GC16
+        // path, so the panel cleanly transitions wallpaper -> page.
+        if (SessionState::is_warm_wake()) {
+          // Stage 2: capture the three out-params (book_id_out,
+          // page_id_out, format_hash_out) and stash them somewhere
+          // BookController::open_book_file can read so it can call
+          // wake_snapshot.invalidate() if the about-to-open book
+          // doesn't match the painted snapshot. Right now we paint
+          // unconditionally and rely on the BookParamController
+          // invalidate hooks to catch format-edit staleness; a
+          // user who navigates to a different book between sleep
+          // and wake will see ~2-4 s of stale content before the
+          // real render replaces it.
+          if (wake_snapshot.restore_to_panel(nullptr, nullptr, nullptr)) {
+            LOG_I("warm-wake: snapshot painted, continuing boot");
+          }
+          else {
+            LOG_I("warm-wake: no snapshot available; falling back to "
+                  "normal boot rendering");
+          }
+        }
 
         event_mgr.setup();
         event_mgr.set_orientation(orientation);
@@ -174,7 +230,14 @@
           inkplate_platform.deep_sleep(INT_PIN, LEVEL);
         }
 
-        msg_viewer.show(MsgViewer::MsgType::INFO, false, true, "Starting", "One moment please...");
+        // On warm wake the sleep-screen / wallpaper is still latched on
+        // the panel and serves as the boot splash — show "Starting…"
+        // only on a real cold boot. Saves a ~600-800 ms GC16 update
+        // and avoids replacing the user's wallpaper with a generic
+        // placeholder for no reason.
+        if (!SessionState::is_warm_wake()) {
+          msg_viewer.show(MsgViewer::MsgType::INFO, false, true, "Starting", "One moment please...");
+        }
 
         books_dir_controller.setup();
         LOG_D("Initialization completed");

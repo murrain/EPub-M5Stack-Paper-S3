@@ -7,6 +7,7 @@
 
 #include "models/config.hpp"
 #include "models/font_factory.hpp"
+#include "models/session_state.hpp"
 #include "viewers/msg_viewer.hpp"
 #include "viewers/form_viewer.hpp"
 #include "controllers/book_param_controller.hpp"
@@ -160,6 +161,18 @@ bool Fonts::setup()
       return false;
     }
 
+    // On warm wake, skip the per-font stat() existence checks. The
+    // user font files were validated on the previous cold boot and
+    // are unlikely to have vanished while the device was asleep.
+    // Each stat on SPI-SD costs roughly 5-15 ms; with 4 stats per
+    // font and up to 8 fonts that adds up to a few hundred ms of
+    // pure existence-checking on the boot path. We still parse the
+    // XML and populate the filename arrays the same way; only the
+    // stats are skipped. If a font file actually went missing the
+    // failure surfaces later when its TTF is opened for rendering,
+    // and the user can resolve it by power-cycling the device which
+    // will run the full cold-boot validation.
+    const bool skip_font_stats = SessionState::is_warm_wake();
     font_count = 0;
     auto user_group = fd.child("fonts").find_child_by_attribute("group", "name", "USER");
     for (auto fnt : user_group.children("font")) {
@@ -170,16 +183,20 @@ bool Fonts::setup()
         LOG_D("%s...", str.c_str());
         font_names[font_count] = char_pool.set(str);
         str = fnt.child("normal").attribute("filename").value();
-        if (check_file(str = filter_filename(str))) {
+        str = filter_filename(str);
+        if (skip_font_stats || check_file(str)) {
           regular_fname[font_count] = char_pool.set(str);
           str = fnt.child("bold").attribute("filename").value();
-          if (check_file(str = filter_filename(str))) {
+          str = filter_filename(str);
+          if (skip_font_stats || check_file(str)) {
             bold_fname[font_count] = char_pool.set(str);
             str = fnt.child("italic").attribute("filename").value();
-            if (check_file(str = filter_filename(str))) {
+            str = filter_filename(str);
+            if (skip_font_stats || check_file(str)) {
               italic_fname[font_count] = char_pool.set(str);
               str = fnt.child("bold-italic").attribute("filename").value();
-              if (check_file(str = filter_filename(str))) {
+              str = filter_filename(str);
+              if (skip_font_stats || check_file(str)) {
                 bold_italic_fname[font_count] = char_pool.set(str);
                 LOG_I("Font %s OK", font_names[font_count]);
                 font_count++;
@@ -269,6 +286,18 @@ Fonts::clear_everything()
 void
 Fonts::adjust_default_font(uint8_t font_index)
 {
+  // Guard against a corrupted .pars / config persisting an out-of-range
+  // font index. The font_*_fname arrays are sized 8 (the hard cap in the
+  // font-loader at line 166) and only the first font_count slots are
+  // populated. Without this clamp, an out-of-range index would read
+  // arbitrary memory and replace() would attempt to load a garbage path.
+  if (font_index >= font_count) {
+    LOG_E("adjust_default_font: index %u out of range (count=%u); using 0",
+          (unsigned)font_index, (unsigned)font_count);
+    font_index = 0;
+  }
+  if (font_count == 0) return;
+
   if (font_cache.at(3).name.compare(font_names[font_index]) != 0) {
     std::string normal      = std::string(FONTS_FOLDER "/").append(    regular_fname[font_index]);
     std::string bold        = std::string(FONTS_FOLDER "/").append(       bold_fname[font_index]);
