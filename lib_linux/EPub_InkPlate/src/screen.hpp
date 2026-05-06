@@ -77,9 +77,28 @@ class Screen : NonCopyable
     void                          to_user_coord(uint16_t & x, uint16_t & y) {}
     inline void               force_full_update() { }
 
+    // No-op stubs of the PaperS3 panel-framebuffer + ScopedRenderTarget
+    // surface so common code (PageCache and the page-cache + wake-
+    // snapshot consumers) compiles without #ifdef walls. Linux dev
+    // builds don't have the off-screen pre-paint feature; the cache
+    // module no-ops on a null framebuffer the same way it does on
+    // Inkplate boards. Stub does nothing intentionally even with a
+    // null `buf` — constructing it that way is the supported pattern
+    // for cross-platform consumers, not an error.
+    inline uint8_t * get_panel_framebuffer() { return nullptr; }
+    inline size_t    get_panel_framebuffer_size() { return 0; }
+    class ScopedRenderTarget
+    {
+      public:
+        ScopedRenderTarget(uint8_t * /*buf*/, size_t /*expected_size*/) {}
+        ~ScopedRenderTarget() {}
+        ScopedRenderTarget(const ScopedRenderTarget &) = delete;
+        ScopedRenderTarget & operator=(const ScopedRenderTarget &) = delete;
+    };
+
     inline static uint16_t get_width() { return width; }
     inline static uint16_t get_height() { return height; }
-    
+
     #if TOUCH_TRIAL
       GtkWidget
         * window,
