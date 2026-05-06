@@ -137,11 +137,34 @@ AppController::going_to_deep_sleep()
     touch_screen.shutdown();
   #endif
 
-  // Stop pre-paint BEFORE the retriever — pre-paint's render path
-  // calls into page_locs (get_page_info) and epub state, both of
-  // which the retriever stop will tear down. Lock-order: cache,
-  // page_locs, epub. Same shape used in BooksDirController::enter
-  // for the regular nav-back teardown.
+  // Persist the wake snapshot FIRST, while page_cache is still
+  // alive. The Phase C multi-page format relies on
+  // PageCache::enumerate_complete returning live entries during
+  // persist(); calling page_cache.stop() before persist would
+  // wipe the slab and the entry table, leaving the v2 file with
+  // page_count = 1 (primary only, no pre-painted neighbors).
+  //
+  // We persist BEFORE the controller leave() callbacks because some
+  // of them (book_controller -> save_last_book) write to NVS on the
+  // same SPI bus, and ordering the SD write first keeps any later
+  // NVS-side hiccup from leaving an orphaned snapshot pointing at
+  // a book id whose was_shown bit didn't get set.
+  //
+  // The capture() into PSRAM happened earlier — every book_viewer.
+  // show_page records what's on screen — so this is just the SD-
+  // write half of the snapshot path. Skipped if no capture has
+  // occurred this session (e.g. user was in the books-dir and
+  // never opened a book).
+  if (wake_snapshot.has_pending_capture()) {
+    wake_snapshot.persist();
+  }
+
+  // Now stop pre-paint, AFTER persist has snapshotted the cache.
+  // This is the same lock-order discipline used in BooksDir
+  // Controller::enter (cache → page_locs → epub) but we don't
+  // close the file here because the SleepScreenViewer painted
+  // during the leave() switch below still needs fonts alive (see
+  // BookController::leave's going_to_deep_sleep=true branch).
   page_cache.stop();
 
   // Stop the page-locations retriever before any controller writes its
@@ -151,23 +174,6 @@ AppController::going_to_deep_sleep()
   // corrupting either file. stop_document is safe to call when already
   // idle (the STOP handler short-circuits and sends STOPPED immediately).
   page_locs.stop_document();
-
-  // Persist the most recent rendered book page to SD before any
-  // controller writes its sleep-time UI (sleep-screen wallpaper,
-  // splash, etc.) over the framebuffer. The capture() into PSRAM
-  // happened earlier — every book_viewer.show_page records what's
-  // on screen — so this is just the SD-write half of the snapshot
-  // path. Skipped if no capture has occurred this session (e.g.
-  // user was in the books-dir and never opened a book).
-  //
-  // We persist BEFORE the controller leave() callbacks because some
-  // of them (book_controller -> save_last_book) write to NVS on the
-  // same SPI bus, and ordering the SD write first keeps any later
-  // NVS-side hiccup from leaving an orphaned snapshot pointing at
-  // a book id whose was_shown bit didn't get set.
-  if (wake_snapshot.has_pending_capture()) {
-    wake_snapshot.persist();
-  }
 
   switch (current_ctrl) {
     case Ctrl::DIR:     books_dir_controller.leave(true); break;

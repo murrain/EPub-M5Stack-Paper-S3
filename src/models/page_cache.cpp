@@ -383,6 +383,49 @@ PageCache::get(const PageLocs::PageId & page_id,
 #endif
 }
 
+bool
+PageCache::inject_entry(const PageLocs::PageId & page_id,
+                        uint32_t format_hash,
+                        const uint8_t * source_fb,
+                        size_t source_size)
+{
+#if EPUB_INKPLATE_BUILD && defined(BOARD_TYPE_PAPER_S3)
+  if ((source_fb == nullptr) || (source_size == 0)) return false;
+
+  std::scoped_lock guard(cache_mutex_);
+  if (!active_) return false;
+  if (source_size != fb_size_) {
+    LOG_W("inject_entry: size mismatch (got %u, expected %u)",
+          (unsigned) source_size, (unsigned) fb_size_);
+    return false;
+  }
+
+  // If the page is already cached, replace it (newer-from-disk wins
+  // over a possibly-stale slot — though in practice both should be
+  // the same content given the format_hash precondition).
+  int slot = find_entry_for(page_id);
+  if (slot < 0) {
+    slot = find_free_slot();
+    if (slot < 0) {
+      LOG_D("inject_entry: no free slot for (%d,%d)",
+            (int) page_id.itemref_index, (int) page_id.offset);
+      return false;
+    }
+  }
+
+  std::memcpy(entries_[slot].framebuffer, source_fb, source_size);
+  entries_[slot].page_id     = page_id;
+  entries_[slot].format_hash = format_hash;
+  entries_[slot].in_use      = true;
+  entries_[slot].complete    = true;
+
+  return true;
+#else
+  (void) page_id; (void) format_hash; (void) source_fb; (void) source_size;
+  return false;
+#endif
+}
+
 size_t
 PageCache::enumerate_complete(CompleteEntry * out, size_t max)
 {

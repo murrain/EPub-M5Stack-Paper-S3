@@ -223,7 +223,30 @@ BookController::open_book_file(
       // tight) — that's fine, foreground render still works and
       // is_active() returns false so show_and_capture skips the
       // residency request.
-      page_cache.start();
+      if (page_cache.start()) {
+        // Phase C warm-wake hydration: if the just-opened book
+        // matches the wake_snapshot's persisted book_id and
+        // format_hash, inject all the snapshot's non-primary
+        // entries into PageCache so the user can swipe to those
+        // pages instantly post-wake. Mismatch (different book
+        // opened than the one captured at sleep) is a benign
+        // skip — pre-paint will repopulate organically as the
+        // user navigates.
+        //
+        // Must happen BEFORE the first show_and_capture (which
+        // would request residency and trigger pre-paint of
+        // current ± N), otherwise pre-paint would re-render
+        // pages we already have on disk from the snapshot.
+        uint32_t fh = WakeSnapshot::format_params_hash(
+                        epub.get_book_format_params(),
+                        sizeof(EPub::BookFormatParams));
+        uint32_t book_id = 0;
+        int16_t  bidx    = books_dir_controller.get_current_book_index();
+        if ((bidx >= 0) &&
+            books_dir.get_book_id((uint16_t) bidx, book_id)) {
+          wake_snapshot.hydrate_page_cache(book_id, fh);
+        }
+      }
     }
     else {
       page_locs.check_for_format_changes(epub.get_item_count(), page_id.itemref_index);
