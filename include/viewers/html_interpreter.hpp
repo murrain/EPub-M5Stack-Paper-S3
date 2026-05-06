@@ -41,6 +41,14 @@ class HTMLInterpreter
     int16_t from_page, to_page;
     int16_t max_level;
 
+    // Per-instance scratch for word extraction. Lives here (not on the
+    // stack of build_pages_recurse) because that function recurses up
+    // to max_level=50 deep on FreeRTOS pthreads with a 3072-byte
+    // default stack — a 128-byte stack frame addition per level
+    // overflowed and corrupted SRAM, surfacing as ESP_ERR_NO_MEM in
+    // sdmmc_read_sectors during book load.
+    char word_buf[128];
+
     static MemoryPool<Page::Format> fmt_pool;
 
     // The page_end method is responsible of doing post-processing once
