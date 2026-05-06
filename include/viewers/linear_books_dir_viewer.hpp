@@ -49,6 +49,14 @@ class LinearBooksDirViewer : public BooksDirViewer
     int16_t prev_column();
 
     int16_t get_index_at(uint16_t x, uint16_t y) {
+      // Guard against unsigned underflow when the tap lands in
+      // the FIRST_ENTRY_YPOS-pixel dead zone at the very top of
+      // the screen. Without this check (y - 5) wraps to ~65530
+      // and divides into a huge idx that happens to fail the
+      // books_per_page bounds check below — accidentally correct
+      // but relying on overflow arithmetic. Mirrors the explicit
+      // y < first_entry_ypos guard in MatrixBooksDirViewer.
+      if (y < FIRST_ENTRY_YPOS) return -1;
       int16_t idx = (y - FIRST_ENTRY_YPOS) / (BooksDir::max_cover_height + SPACE_BETWEEN_ENTRIES);
       return (idx >= books_per_page) ? -1 : (current_page_nbr * books_per_page) + idx;
     }
