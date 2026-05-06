@@ -257,22 +257,30 @@ usb_drive_mode()
 static void
 init_nvs()
 {
-  menu_viewer.clear_highlight();
+  // No menu_viewer.clear_highlight here. msg_viewer.show below
+  // takes over the screen — any partial DU we'd commit to clear
+  // the strip's highlight gets immediately overwritten by the
+  // banner. The hint_shown flag will reset on the next
+  // MenuViewer::show (BooksDirController::enter on next DIR
+  // entry, or option_controller.show_menu post-form completion).
+  // Same logic applies to other fire-and-forget action callbacks
+  // that end in msg_viewer.show — they shouldn't pre-clear what
+  // they're about to overwrite.
   #if EPUB_INKPLATE_BUILD
     if (nvs_mgr.setup(true)) {
       msg_viewer.show(
-        MsgViewer::MsgType::BOOK, 
+        MsgViewer::MsgType::BOOK,
         false,
         false,
-        "E-Books History Cleared", 
+        "E-Books History Cleared",
         "The E-Books History has been initialized with success.");
     }
     else {
       msg_viewer.show(
-        MsgViewer::MsgType::BOOK, 
+        MsgViewer::MsgType::BOOK,
         false,
         false,
-        "E-Books History Clearing Error", 
+        "E-Books History Clearing Error",
         "The E-Books History has not been initialized properly. "
         "Potential hardware problem or software framework issue.");
     }
