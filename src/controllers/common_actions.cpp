@@ -115,12 +115,16 @@ CommonActions::power_it_off()
 void
 CommonActions::about()
 {
-  menu_viewer.clear_highlight();
+  // Same waste pattern as init_nvs: msg_viewer.show takes over
+  // the screen, so a prior strip-only DU to clear the highlight
+  // is immediately overwritten. hint_shown stays true until the
+  // next MenuViewer::show resets it (DIR re-entry or post-form),
+  // which is harmless — the flag has no direct display effect.
   msg_viewer.show(
-    MsgViewer::MsgType::BOOK, 
+    MsgViewer::MsgType::BOOK,
     false,
     false,
-    "About EPub-InkPlate", 
+    "About EPub-InkPlate",
     "EPub EBook Reader Version %s for the InkPlate e-paper display devices. "
     "This application was made by Guy Turcotte, Quebec, QC, Canada, "
     "with great support from e-Radionica.",
