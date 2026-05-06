@@ -38,9 +38,9 @@ namespace Gestures {
     // FSM in event_mgr_paper_s3.cpp), so the same TOP_EDGE_PX
     // gate applies to both gesture kinds.
     //
-    // Use the unambiguous swipe-only variant below if your
-    // screen has tap targets that overlap the top edge — TAP
-    // can ambiguously mean "select that thing at the top" or
+    // Use is_menu_open_swipe() (below) instead if your screen
+    // has tap targets that overlap the top edge — TAP can
+    // ambiguously mean "select that thing at the top" or
     // "open the menu," and the screen needs to make that call
     // itself.
     inline bool is_menu_open(const EventMgr::Event & e) {

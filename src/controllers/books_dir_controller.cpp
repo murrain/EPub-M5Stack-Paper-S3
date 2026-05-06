@@ -331,14 +331,16 @@ BooksDirController::leave(bool going_to_deep_sleep)
       case EventMgr::EventKind::TAP:
         // Universal hit-test: a tap that lands on a book selects
         // it, regardless of which view is active. LinearBooksDir-
-        // Viewer::get_index_at hits the full row width (no x-
-        // filter — see its impl), so a tap on the title or author
-        // text selects the same book as a tap on the cover. Matrix
-        // view already worked this way. The legacy "tap on right
-        // two-thirds in linear view → menu" path is gone — menu
-        // open is the SWIPE_DOWN-from-top gesture, plus the
-        // fall-through here when get_index_at returns no hit
-        // (tap below the last row, or on a partial-page edge).
+        // Viewer::get_index_at hits the full row width — no
+        // x-filter — see include/viewers/linear_books_dir_viewer
+        // .hpp::get_index_at. So a tap on the title or author
+        // text selects the same book as a tap on the cover.
+        // Matrix view already worked this way. The legacy "tap
+        // on right two-thirds in linear view → menu" path is
+        // gone — menu open is the SWIPE_DOWN-from-top gesture,
+        // plus the fall-through here when get_index_at returns
+        // no hit (tap below the last row, or on a partial-page
+        // edge).
         current_book_index = books_dir_viewer->get_index_at(event.x, event.y);
         if ((current_book_index >= 0) && (current_book_index < books_dir.get_book_count())) {
           book = books_dir.get_book_data(current_book_index);
