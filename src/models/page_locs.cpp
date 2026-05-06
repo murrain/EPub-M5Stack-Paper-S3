@@ -92,6 +92,36 @@ struct RetrieveQueueData {
   #define QUEUE_RECEIVE(q, m, t)  xQueueReceive(q, &m, t)
 #endif
 
+// =====================================================================
+// STOP / STOPPED handshake invariant
+//
+// PageLocs::stop_document() and several lifecycle paths rely on a
+// specific guarantee: when STOPPED arrives back on mgr_queue, the
+// RetrieverTask is GENUINELY IDLE — not just yielded mid-build.
+//
+// The handshake works like this:
+//   1. caller -> state_queue: STOP
+//   2. StateTask sees STOP, sets aborting=true, then either:
+//        a) retriever already idle → mgr_queue: STOPPED immediately, or
+//        b) sets stopping=true; STOPPED is emitted later when the
+//           retriever completes its current build and emits ITEM_READY
+//           (or ASAP_READY) back to StateTask, which then drains and
+//           replies STOPPED.
+//   3. RetrieverTask emits ITEM_READY/ASAP_READY only AFTER
+//      build_page_locs returns. build_page_locs releases its
+//      scoped_lock(book_viewer.get_mutex()) on the way out and
+//      drops back to QUEUE_RECEIVE(retrieve_queue, ..., portMAX_DELAY).
+//   4. So by the time STOPPED arrives at mgr_queue, the retriever
+//      holds neither the book_viewer mutex nor any stack reference
+//      into PageLocs::item_info — it's blocked in the queue receive.
+//
+// This is what makes the clear_item_data(item_info) call inside
+// stop_document safe: no concurrent reader, no in-flight pointer
+// into the structure being freed. Any future change that emits
+// STOPPED on a path that DOESN'T go through ITEM_READY/ASAP_READY
+// (and therefore through build_page_locs's full unwind) MUST audit
+// this guarantee or it can race against item_info teardown.
+// =====================================================================
 class StateTask
 {
   private:
@@ -819,16 +849,6 @@ PageLocs::retrieve_asap(int16_t itemref_index)
   relax = false;
 
   return true;
-}
-
-bool
-PageLocs::is_aborting() const
-{
-  // Forwards to the StateTask flag because state_task is a static
-  // inside this TU. Used by HTMLInterpreter inner loops via the
-  // PageLocsInterp::should_abort_inner override; see html_interpreter
-  // build_pages_recurse character loop for the call site.
-  return state_task.is_aborting();
 }
 
 void

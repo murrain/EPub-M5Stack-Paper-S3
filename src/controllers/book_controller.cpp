@@ -48,6 +48,16 @@ BookController::enter()
 {
   LOG_D("===> Enter()...");
 
+  #if DEBUGGING && EPUB_INKPLATE_BUILD
+    // Heap watermark on every book enter. Lets a maintainer verify
+    // the sequential-load leak fix on a regression-test repro: open
+    // book A, back to dir, open book B, etc., and watch that the
+    // free / largest-block numbers return to baseline between books.
+    // Anything growing monotonically across enters is a regression.
+    // Gated on DEBUGGING so release builds don't pay the LOG_I cost.
+    ESP::show_internal_heap_info("BookController::enter");
+  #endif
+
   page_locs.check_for_format_changes(epub.get_item_count(), current_page_id.itemref_index);
   const PageLocs::PageId * id = page_locs.get_page_id(current_page_id);
   if (id != nullptr) {
@@ -66,34 +76,23 @@ BookController::leave(bool going_to_deep_sleep)
 {
   LOG_D("===> leave()...");
 
+  // Teardown of the active book (page_locs.stop_document +
+  // epub.close_file) is NOT done here. AppController::launch calls
+  // leave() on every transition out of BOOK including BOOK→PARAM
+  // (book parameters editing) and BOOK→TOC, both of which expect
+  // the file to remain open — BookParamController reads epub.get_
+  // book_params and get_book_format_params, TocController calls
+  // epub.retrieve_file for the NCX. Closing the file on those
+  // transitions and not reopening it on PARAM/TOC→BOOK return
+  // would silently break those flows.
+  //
+  // Instead, the teardown lives in BooksDirController::enter,
+  // which is the natural exit point of a book session — symmetric
+  // with how BooksDirController is also where books get opened.
+  // The deep-sleep path doesn't transition through DIR; it stops
+  // the retriever directly in app_controller.going_to_deep_sleep
+  // and lets the PMU power-cut reclaim the rest.
   books_dir_controller.save_last_book(current_page_id, going_to_deep_sleep);
-
-  if (!going_to_deep_sleep) {
-    // Regular navigation back to dir/options/etc. Tear down the
-    // active book to free heap. Without this, the previous book's
-    // OPF buffer, encryption buffer, EPub::css_cache, fonts loaded
-    // for the book, and PageLocs::item_info's resident pugixml DOM
-    // + CSS suite + raw data all stayed pinned until the user
-    // happened to open another book — at which point epub.open_file
-    // would call close_file as a side-effect. With sequential book
-    // opens (read book A, back to dir, open book B, repeat) the
-    // cleanup window kept narrowing as the next book's allocations
-    // had to fit alongside the previous one's still-resident state,
-    // eventually exhausting internal SRAM contig blocks.
-    //
-    // page_locs.stop_document() must come before close_file: the
-    // RetrieverTask may be mid-build when the user hits "back",
-    // and we need it idle before we yank the EPub state from
-    // under it (otherwise it page-faults on item_info's freed
-    // xml_doc on the next iteration).
-    //
-    // Skipped on going_to_deep_sleep=true because the SleepScreen
-    // viewer that paints during the sleep-entry window needs fonts
-    // alive (close_file calls fonts.clear). The PMU power-cut
-    // releases everything anyway when sleep actually fires.
-    page_locs.stop_document();
-    epub.close_file();
-  }
 }
 
 bool

@@ -127,12 +127,6 @@ class PageLocs
     void abort_threads();
     bool build_page_locs(int16_t itemref_index);
 
-    // Fast read of the StateTask abort flag, intended for use inside
-    // tight inner loops of HTMLInterpreter::build_pages_recurse. Just
-    // a flag fetch — no yield, no logging, no mutex. Called frequently
-    // to keep abort latency low (sub-100 ms even on long pages).
-    bool is_aborting() const;
-
     const PageId * get_next_page_id(const PageId & page_id, int16_t count = 1);
     const PageId * get_prev_page_id(const PageId & page_id, int     count = 1);
     const PageId *      get_page_id(const PageId & page_id                   );
