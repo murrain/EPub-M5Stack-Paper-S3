@@ -3,6 +3,7 @@
 
 #if defined(BOARD_TYPE_PAPER_S3)
 
+#include <cassert>
 #include <cstring>
 #include "esp_heap_caps.h"
 
@@ -32,7 +33,22 @@ extern "C" {
 
 static EpdiyHighlevelState s_hl;
 static bool s_epd_initialized = false;
+// The actual panel-backing framebuffer obtained from epdiy. Always
+// the target of update() — updating from any other buffer would
+// drive the panel from PSRAM scratch state and is asserted against.
 static uint8_t *s_framebuffer = nullptr;
+// The CURRENT draw target. Equal to s_framebuffer in the default
+// (foreground render) case; swapped to a caller-supplied buffer for
+// the lifetime of a Screen::ScopedRenderTarget guard so background
+// pre-paint can render pages without touching the panel. All
+// draw_* primitives here read s_active_framebuffer; only update()
+// /clear()/panel_clear() / setup() touch s_framebuffer directly.
+//
+// Thread-safety contract: concurrent guard construction is undefined.
+// The caller layer (PageCache + BookController for Stage 2) owns the
+// mutex that serializes pre-paint with foreground paints. Verified
+// via debug-only assertion in the guard's constructor.
+static uint8_t *s_active_framebuffer = nullptr;
 static bool s_force_full = true;
 static int16_t s_partial_count = 0;
 static const int16_t PARTIAL_COUNT_ALLOWED = 10;
@@ -82,6 +98,16 @@ static inline void run_update(EpdDrawMode mode, int temperature, const char * mo
 void Screen::update(UpdateMode mode)
 {
   if (!s_epd_initialized) return;
+
+  // Loud failure on accidental update during a ScopedRenderTarget.
+  // Calling update() while a guard has the active framebuffer aimed
+  // at a PSRAM scratch buffer would push that scratch state to the
+  // panel — at best a corruption bug, at worst overwriting whatever
+  // was correctly on screen with cache content the user never asked
+  // to see. The guard's destructor restores s_active_framebuffer
+  // before any future update() should fire, so this asserts a
+  // genuine bug, not a timing race.
+  assert(s_active_framebuffer == s_framebuffer);
 
   // s_force_full always wins, regardless of caller's requested mode. This
   // preserves the historical short-circuit semantics: a pending forced
@@ -195,6 +221,31 @@ size_t Screen::get_panel_framebuffer_size()
   return s_epd_initialized ? (size_t)((EPD_WIDTH / 2) * EPD_HEIGHT) : 0;
 }
 
+Screen::ScopedRenderTarget::ScopedRenderTarget(uint8_t * buf,
+                                               size_t expected_size)
+{
+  // expected_size sanity check — catches callers who allocate
+  // 1bpp-sized buffers for the 4bpp panel, which would otherwise
+  // present as garbled-but-intermittent renders.
+  assert(buf != nullptr);
+  assert(expected_size == (size_t)((EPD_WIDTH / 2) * EPD_HEIGHT));
+  // Non-nesting / non-concurrency assertion: the active framebuffer
+  // must currently point at the panel. If it points elsewhere, two
+  // guards are live at once — a contract violation by the caller
+  // layer. Catches the silent-corruption failure mode of the design.
+  assert(s_active_framebuffer == s_framebuffer);
+  prev_target_        = s_active_framebuffer;
+  s_active_framebuffer = buf;
+}
+
+Screen::ScopedRenderTarget::~ScopedRenderTarget()
+{
+  // Restore on every path out of the guard's scope, including
+  // exception unwind. The asserts above guarantee prev_target_
+  // was s_framebuffer; restoring blindly is correct.
+  s_active_framebuffer = prev_target_;
+}
+
 void Screen::setup(PixelResolution resolution, Orientation orientation,
                    bool preserve_panel_image)
 {
@@ -211,7 +262,8 @@ void Screen::setup(PixelResolution resolution, Orientation orientation,
 
     s_hl = epd_hl_init(EPD_BUILTIN_WAVEFORM);
     epd_hl_set_all_white(&s_hl);
-    s_framebuffer = epd_hl_get_framebuffer(&s_hl);
+    s_framebuffer        = epd_hl_get_framebuffer(&s_hl);
+    s_active_framebuffer = s_framebuffer;
 
     epd_poweron();
     if (!preserve_panel_image) {
@@ -313,7 +365,7 @@ static inline void set_pixel_nibble_physical(uint16_t x, uint16_t y, uint8_t nib
 {
   // Write a 4-bpp pixel directly into the epdiy framebuffer.
   // x: 0..EPD_WIDTH-1 (960), y: 0..EPD_HEIGHT-1 (540)
-  uint8_t * buf_ptr = &s_framebuffer[y * (EPD_WIDTH / 2) + (x >> 1)];
+  uint8_t * buf_ptr = &s_active_framebuffer[y * (EPD_WIDTH / 2) + (x >> 1)];
   if (x & 1) {
     *buf_ptr = (uint8_t)((*buf_ptr & 0x0F) | ((nibble & 0x0F) << 4));
   } else {
@@ -357,7 +409,7 @@ void Screen::draw_bitmap(const unsigned char * bitmap_data, Dim dim, Pos pos)
     // pixel writes into the same framebuffer row — recomputing the
     // row index per pixel was the dominant cost.
     const uint16_t phys_row = (uint16_t)((EPD_HEIGHT - 1) - x);
-    uint8_t * const row_base = &s_framebuffer[phys_row * (EPD_WIDTH / 2)];
+    uint8_t * const row_base = &s_active_framebuffer[phys_row * (EPD_WIDTH / 2)];
     const uint16_t x_off_in_bmp = (uint16_t)(x - pos.x);
 
     for (uint16_t y = pos.y; y < y_max; ++y) {
@@ -394,7 +446,7 @@ void Screen::draw_glyph(const unsigned char * bitmap_data, Dim dim, Pos pos, uin
     // subtraction per pixel. Now the inner loop is just one address
     // add (phys_col>>1) and the nibble RMW.
     const uint16_t phys_row = (uint16_t)((EPD_HEIGHT - 1) - (pos.x + i));
-    uint8_t * const row_base = &s_framebuffer[phys_row * (EPD_WIDTH / 2)];
+    uint8_t * const row_base = &s_active_framebuffer[phys_row * (EPD_WIDTH / 2)];
     const unsigned char * const col_base = bitmap_data + i;
 
     for (uint16_t j = 0; j < dim.height && (pos.y + j) < y_max; ++j) {

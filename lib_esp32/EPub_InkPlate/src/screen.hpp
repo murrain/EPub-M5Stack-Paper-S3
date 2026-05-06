@@ -100,6 +100,43 @@ class Screen : NonCopyable
     uint8_t * get_panel_framebuffer();
     size_t    get_panel_framebuffer_size();
 
+    // RAII guard: while constructed, all Screen::draw_* primitives
+    // write into the caller-supplied buffer instead of the panel
+    // framebuffer. Destructor restores the panel target. Used by
+    // the Stage 2 PageCache background pre-paint path to render
+    // pages into PSRAM scratch buffers without touching the
+    // displayed image.
+    //
+    // CONTRACTS the caller MUST honor:
+    //   1. `buf` must point to writable memory of at least
+    //      `expected_size` bytes equal to get_panel_framebuffer_size()
+    //      (typically ~256 KB for the 960×540×4bpp panel). Mismatch
+    //      is asserted in debug builds; release builds will simply
+    //      paint into whatever's there.
+    //   2. The CALLER serializes guard construction. Concurrent
+    //      guards from different threads is undefined behavior —
+    //      the indirection through s_active_framebuffer is not
+    //      atomic. The page-cache + book_controller layer owns the
+    //      mutex that enforces "pre-paint and foreground paints
+    //      never overlap." Debug builds assert non-nesting in the
+    //      constructor.
+    //   3. screen.update() inside a guard is a bug — would push
+    //      the scratch buffer to the panel. Asserted in update().
+    //   4. Caller is responsible for clearing the buffer before
+    //      drawing if a known background is desired. This guard
+    //      does NOT call epd_hl_set_all_white because the off-
+    //      screen target has no panel-state semantics.
+    class ScopedRenderTarget
+    {
+      public:
+        ScopedRenderTarget(uint8_t * buf, size_t expected_size);
+        ~ScopedRenderTarget();
+        ScopedRenderTarget(const ScopedRenderTarget &) = delete;
+        ScopedRenderTarget & operator=(const ScopedRenderTarget &) = delete;
+      private:
+        uint8_t * prev_target_;
+    };
+
     inline static uint16_t get_width() { return width; }
     inline static uint16_t get_height() { return height; }
 };
@@ -237,6 +274,22 @@ class Screen : NonCopyable
     // a null framebuffer here.
     inline uint8_t * get_panel_framebuffer() { return nullptr; }
     inline size_t    get_panel_framebuffer_size() { return 0; }
+
+    // No-op stub of the PaperS3 ScopedRenderTarget so common code
+    // (PageCache and friends) compiles without #ifdef walls.
+    // Inkplate boards don't have the s_framebuffer indirection that
+    // makes off-screen retargeting cheap, and the page-cache feature
+    // is PaperS3-only by virtue of relying on the wake-snapshot
+    // single-page path that already returns nullptr above. Both
+    // constructor and destructor are empty here.
+    class ScopedRenderTarget
+    {
+      public:
+        ScopedRenderTarget(uint8_t * /*buf*/, size_t /*expected_size*/) {}
+        ~ScopedRenderTarget() {}
+        ScopedRenderTarget(const ScopedRenderTarget &) = delete;
+        ScopedRenderTarget & operator=(const ScopedRenderTarget &) = delete;
+    };
 
     #if INKPLATE_6PLUS
       void to_user_coord(uint16_t & x, uint16_t & y);
