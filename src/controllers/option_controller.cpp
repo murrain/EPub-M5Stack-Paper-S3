@@ -496,91 +496,90 @@ OptionController::dispatch_to_sub_state(const EventMgr::Event & event)
   if (main_form_is_shown) {
     if (form_viewer.event(event)) {
       main_form_is_shown = false;
-      // if (ok) {
-        config.put(Config::Ident::ORIENTATION,      (int8_t) orientation);
-        config.put(Config::Ident::DIR_VIEW,         dir_view            );
-        #if !defined(BOARD_TYPE_PAPER_S3)
-          config.put(Config::Ident::PIXEL_RESOLUTION, (int8_t) resolution );
-        #endif
-        config.put(Config::Ident::BATTERY,          show_battery        );
-        config.put(Config::Ident::SHOW_TITLE,       show_title          );
-        config.put(Config::Ident::TIMEOUT,          timeout             );
 
-        #if DATE_TIME_RTC
-          config.put(Config::Ident::SHOW_HEAP,      (int8_t)(show_heap_or_rtc == 2 ? 1 : 0));
-          config.put(Config::Ident::SHOW_RTC,       (int8_t)(show_heap_or_rtc == 1 ? 1 : 0));
-        #else
-          config.put(Config::Ident::SHOW_HEAP,      show_heap           );
-        #endif
+      config.put(Config::Ident::ORIENTATION,      (int8_t) orientation);
+      config.put(Config::Ident::DIR_VIEW,         dir_view            );
+      #if !defined(BOARD_TYPE_PAPER_S3)
+        config.put(Config::Ident::PIXEL_RESOLUTION, (int8_t) resolution );
+      #endif
+      config.put(Config::Ident::BATTERY,          show_battery        );
+      config.put(Config::Ident::SHOW_TITLE,       show_title          );
+      config.put(Config::Ident::TIMEOUT,          timeout             );
 
-        config.save();
+      #if DATE_TIME_RTC
+        config.put(Config::Ident::SHOW_HEAP,      (int8_t)(show_heap_or_rtc == 2 ? 1 : 0));
+        config.put(Config::Ident::SHOW_RTC,       (int8_t)(show_heap_or_rtc == 1 ? 1 : 0));
+      #else
+        config.put(Config::Ident::SHOW_HEAP,      show_heap           );
+      #endif
 
-        if (old_orientation != orientation) {
-          screen.set_orientation(orientation);
-          event_mgr.set_orientation(orientation);
-          books_dir_controller.new_orientation();
+      config.save();
+
+      if (old_orientation != orientation) {
+        screen.set_orientation(orientation);
+        event_mgr.set_orientation(orientation);
+        books_dir_controller.new_orientation();
+      }
+
+      if (old_dir_view != dir_view) {
+        books_dir_controller.set_current_book_index(-1);
+      }
+
+      #if !defined(BOARD_TYPE_PAPER_S3)
+        if (old_resolution != resolution) {
+          fonts.clear_glyph_caches();
+          screen.set_pixel_resolution(resolution);
         }
+      #endif
 
-        if (old_dir_view != dir_view) {
-          books_dir_controller.set_current_book_index(-1);
-        }
+      if ((old_orientation != orientation) ||
+          (old_show_title  != show_title )) {
+        page_locs.stop_document();
+        epub.update_book_format_params();
+      }
 
-        #if !defined(BOARD_TYPE_PAPER_S3)
-          if (old_resolution != resolution) {
-            fonts.clear_glyph_caches();
-            screen.set_pixel_resolution(resolution);
-          }
-        #endif
-
+      #if !defined(BOARD_TYPE_PAPER_S3)
         if ((old_orientation != orientation) ||
-            (old_show_title  != show_title )) {
-          page_locs.stop_document();
-          epub.update_book_format_params();
-        }
-
-        #if !defined(BOARD_TYPE_PAPER_S3)
-          if ((old_orientation != orientation) ||
-              (old_resolution  != resolution )) {
-        #else
-          if (old_orientation != orientation) {
-        #endif
-          menu_viewer.show(menu, 2, true);
-        }
-        else {
-          menu_viewer.clear_highlight();
-        }
-      // }
+            (old_resolution  != resolution )) {
+      #else
+        if (old_orientation != orientation) {
+      #endif
+        menu_viewer.show(menu, 2, true);
+      }
+      else {
+        menu_viewer.clear_highlight();
+      }
     }
   }
   else if (font_form_is_shown) {
     if (form_viewer.event(event)) {
       font_form_is_shown = false;
-      // if (ok) {
-        config.put(Config::Ident::SHOW_IMAGES,        show_images       );
-        config.put(Config::Ident::FONT_SIZE,          font_size         );
-        config.put(Config::Ident::DEFAULT_FONT,       default_font      );
-        config.put(Config::Ident::USE_FONTS_IN_BOOKS, use_fonts_in_books);
-        config.save();
 
-        if ((old_show_images        != show_images       ) ||
-            (old_font_size          != font_size         ) ||
-            (old_default_font       != default_font      ) ||
-            (old_use_fonts_in_books != use_fonts_in_books)) {
-          page_locs.stop_document();
-          epub.update_book_format_params();
-        }
+      config.put(Config::Ident::SHOW_IMAGES,        show_images       );
+      config.put(Config::Ident::FONT_SIZE,          font_size         );
+      config.put(Config::Ident::DEFAULT_FONT,       default_font      );
+      config.put(Config::Ident::USE_FONTS_IN_BOOKS, use_fonts_in_books);
+      config.save();
 
-        if (old_default_font != default_font) {
-          fonts.adjust_default_font(default_font);
-        }
+      if ((old_show_images        != show_images       ) ||
+          (old_font_size          != font_size         ) ||
+          (old_default_font       != default_font      ) ||
+          (old_use_fonts_in_books != use_fonts_in_books)) {
+        page_locs.stop_document();
+        epub.update_book_format_params();
+      }
 
-        if (old_use_fonts_in_books != use_fonts_in_books) {
-          if (use_fonts_in_books == 0) {
-            fonts.clear();
-            fonts.clear_glyph_caches();
-          }
+      if (old_default_font != default_font) {
+        fonts.adjust_default_font(default_font);
+      }
+
+      if (old_use_fonts_in_books != use_fonts_in_books) {
+        if (use_fonts_in_books == 0) {
+          fonts.clear();
+          fonts.clear_glyph_caches();
         }
-      // }
+      }
+
       menu_viewer.clear_highlight();
     }
   }
