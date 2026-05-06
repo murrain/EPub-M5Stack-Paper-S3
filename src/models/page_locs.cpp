@@ -19,6 +19,12 @@
 #include <ios>
 #include <memory>
 
+// MgrReq used to discriminate two reply kinds on a shared
+// mgr_queue. Now each kind has its own queue (asap_queue,
+// stopped_queue), so the enum is mostly redundant — but keep
+// it: it still shows up in log lines as a sanity tag, and
+// keeping a shared MgrQueueData lets both queues use the same
+// element size without two parallel structs.
 enum class MgrReq : int8_t { ASAP_READY, STOPPED };
 
 struct MgrQueueData {
@@ -44,11 +50,18 @@ struct RetrieveQueueData {
 #if EPUB_LINUX_BUILD
   #include <chrono>
 
-  static mqd_t mgr_queue;
+  // Two reply queues, one per reply type. Splitting the
+  // formerly-shared mgr_queue eliminates the latent race where
+  // a STOPPED arriving on retrieve_asap's path (or vice versa)
+  // would log "ERROR!!!" and mis-handle. Each consumer waits on
+  // its own queue; cross-talk is structurally impossible.
+  static mqd_t asap_queue;     // StateTask → retrieve_asap; carries MgrReq::ASAP_READY
+  static mqd_t stopped_queue;  // StateTask → stop_document; carries MgrReq::STOPPED
   static mqd_t state_queue;
   static mqd_t retrieve_queue;
 
-  static mq_attr mgr_attr      = { 0, 5, sizeof(     MgrQueueData), 0 };
+  static mq_attr asap_attr     = { 0, 5, sizeof(     MgrQueueData), 0 };
+  static mq_attr stopped_attr  = { 0, 2, sizeof(     MgrQueueData), 0 };
   static mq_attr state_attr    = { 0, 5, sizeof(   StateQueueData), 0 };
   static mq_attr retrieve_attr = { 0, 5, sizeof(RetrieveQueueData), 0 };
 
@@ -84,7 +97,10 @@ struct RetrieveQueueData {
       return cfg;
   }
 
-  static QueueHandle_t mgr_queue      = nullptr;
+  // See Linux block above for the rationale on splitting the
+  // formerly-shared mgr_queue into per-reply-type queues.
+  static QueueHandle_t asap_queue     = nullptr;  // → retrieve_asap (ASAP_READY)
+  static QueueHandle_t stopped_queue  = nullptr;  // → stop_document (STOPPED)
   static QueueHandle_t state_queue    = nullptr;
   static QueueHandle_t retrieve_queue = nullptr;
 
@@ -96,13 +112,13 @@ struct RetrieveQueueData {
 // STOP / STOPPED handshake invariant
 //
 // PageLocs::stop_document() and several lifecycle paths rely on a
-// specific guarantee: when STOPPED arrives back on mgr_queue, the
+// specific guarantee: when STOPPED arrives back on stopped_queue, the
 // RetrieverTask is GENUINELY IDLE — not just yielded mid-build.
 //
 // The handshake works like this:
 //   1. caller -> state_queue: STOP
 //   2. StateTask sees STOP, sets aborting=true, then either:
-//        a) retriever already idle → mgr_queue: STOPPED immediately, or
+//        a) retriever already idle → stopped_queue: STOPPED immediately, or
 //        b) sets stopping=true; STOPPED is emitted later when the
 //           retriever completes its current build and emits ITEM_READY
 //           (or ASAP_READY) back to StateTask, which then drains and
@@ -111,9 +127,18 @@ struct RetrieveQueueData {
 //      build_page_locs returns. build_page_locs releases its
 //      scoped_lock(book_viewer.get_mutex()) on the way out and
 //      drops back to QUEUE_RECEIVE(retrieve_queue, ..., portMAX_DELAY).
-//   4. So by the time STOPPED arrives at mgr_queue, the retriever
+//   4. So by the time STOPPED arrives at stopped_queue, the retriever
 //      holds neither the book_viewer mutex nor any stack reference
 //      into PageLocs::item_info — it's blocked in the queue receive.
+//
+// Earlier this all funneled through a single `mgr_queue` carrying
+// both ASAP_READY and STOPPED, with each consumer logging "ERROR!!!"
+// if it received the wrong reply type. The current single-threaded
+// UI prevents the consumers from being in flight simultaneously, so
+// the queue never actually mixed reply kinds — but a future async
+// teardown could race. Splitting into asap_queue (→ retrieve_asap)
+// and stopped_queue (→ stop_document) eliminates the latent ambiguity
+// at the cost of one extra QueueHandle.
 //
 // This is what makes the clear_item_data(item_info) call inside
 // stop_document safe: no concurrent reader, no in-flight pointer
@@ -179,7 +204,7 @@ class StateTask
               .req           = MgrReq::ASAP_READY,
               .itemref_index = itemref
             };
-            QUEUE_SEND(mgr_queue, mgr_queue_data, 0);
+            QUEUE_SEND(asap_queue, mgr_queue_data, 0);
             LOG_D("Sent ASAP_READY to Mgr");
           }
         } else {
@@ -275,7 +300,7 @@ class StateTask
                 .req           = MgrReq::STOPPED,
                 .itemref_index = 0
               };
-              QUEUE_SEND(mgr_queue, mgr_queue_data, 0); 
+              QUEUE_SEND(stopped_queue, mgr_queue_data, 0);
             }
             else {
               stopping = true;
@@ -301,7 +326,7 @@ class StateTask
               // Reset stopping defensively: a prior STOP that left
               // stopping=true would otherwise cause the next
               // ITEM_READY/ASAP_READY (if any racy in-flight reply
-              // arrives) to fire a spurious STOPPED into mgr_queue.
+              // arrives) to fire a spurious STOPPED into stopped_queue.
               stopping         = false;
               break;
             }
@@ -341,7 +366,7 @@ class StateTask
                 .req           = MgrReq::ASAP_READY,
                 .itemref_index = (int16_t) -(state_queue_data.itemref_index + 1)
               };
-              QUEUE_SEND(mgr_queue, mgr_queue_data, 0);
+              QUEUE_SEND(asap_queue, mgr_queue_data, 0);
               LOG_D("Sent ASAP_READY to Mgr");
             }
             else {
@@ -351,7 +376,7 @@ class StateTask
                   .req           = MgrReq::ASAP_READY,
                   .itemref_index = itemref
                 };
-                QUEUE_SEND(mgr_queue, mgr_queue_data, 0);
+                QUEUE_SEND(asap_queue, mgr_queue_data, 0);
                 LOG_D("Sent ASAP_READY to Mgr");
               }
               else if (waiting_for_itemref != -1) {
@@ -396,7 +421,7 @@ class StateTask
                   .req           = MgrReq::STOPPED,
                   .itemref_index = 0
                 };
-                QUEUE_SEND(mgr_queue, mgr_queue_data, 0);
+                QUEUE_SEND(stopped_queue, mgr_queue_data, 0);
               }
               else {
                 request_next_item(itemref);
@@ -410,7 +435,7 @@ class StateTask
                   .req           = MgrReq::STOPPED,
                   .itemref_index = 0
                 };
-                QUEUE_SEND(mgr_queue, mgr_queue_data, 0);
+                QUEUE_SEND(stopped_queue, mgr_queue_data, 0);
               }
             }
             break;
@@ -423,7 +448,7 @@ class StateTask
             if (itemref_count != -1) {
               int16_t itemref = state_queue_data.itemref_index;
               // Correct the negative-encoded failure marker BEFORE sending
-              // to mgr_queue. The original code sent the raw (possibly
+              // to asap_queue. The original code sent the raw (possibly
               // negative) itemref, so any future receiver that inspects
               // the index would see an out-of-range value. Match the
               // ITEM_READY handler's correct-then-use pattern.
@@ -435,7 +460,7 @@ class StateTask
                 .req           = MgrReq::ASAP_READY,
                 .itemref_index = itemref
               };
-              QUEUE_SEND(mgr_queue, mgr_queue_data, 0);
+              QUEUE_SEND(asap_queue, mgr_queue_data, 0);
               LOG_D("Sent ASAP_READY to Mgr");
               bitset[itemref >> 3] |= (1 << (itemref & 7));
               if (stopping) {
@@ -445,7 +470,7 @@ class StateTask
                   .req           = MgrReq::STOPPED,
                   .itemref_index = 0
                 };
-                QUEUE_SEND(mgr_queue, mgr_queue_data, 0);
+                QUEUE_SEND(stopped_queue, mgr_queue_data, 0);
               }
               else {
                 request_next_item(itemref, true);
@@ -459,7 +484,7 @@ class StateTask
                   .req           = MgrReq::STOPPED,
                   .itemref_index = 0
                 };
-                QUEUE_SEND(mgr_queue, mgr_queue_data, 0);
+                QUEUE_SEND(stopped_queue, mgr_queue_data, 0);
               }
             }
             break;
@@ -530,12 +555,21 @@ void
 PageLocs::setup()
 {
   #if EPUB_LINUX_BUILD
+    // Linux MQs persist in /dev/mqueue across program runs.
+    // Unlink the new paths AND the legacy "/mgr" name a former
+    // build of this binary may have left behind, so a dev-host
+    // upgrade doesn't accumulate stale kernel state.
     mq_unlink("/mgr");
+    mq_unlink("/asap");
+    mq_unlink("/stopped");
     mq_unlink("/state");
     mq_unlink("/retrieve");
 
-    mgr_queue      = mq_open("/mgr",      O_RDWR|O_CREAT, S_IRWXU, &mgr_attr);
-    if (mgr_queue == -1) { LOG_E("Unable to open mgr_queue: %d", errno); return; }
+    asap_queue     = mq_open("/asap",     O_RDWR|O_CREAT, S_IRWXU, &asap_attr);
+    if (asap_queue == -1) { LOG_E("Unable to open asap_queue: %d", errno); return; }
+
+    stopped_queue  = mq_open("/stopped",  O_RDWR|O_CREAT, S_IRWXU, &stopped_attr);
+    if (stopped_queue == -1) { LOG_E("Unable to open stopped_queue: %d", errno); return; }
 
     state_queue    = mq_open("/state",    O_RDWR|O_CREAT, S_IRWXU, &state_attr);
     if (state_queue == -1) { LOG_E("Unable to open state_queue: %d", errno); return; }
@@ -547,8 +581,12 @@ PageLocs::setup()
     state_thread     = std::thread(state_task);
   #else
     esp_pthread_init();
-    
-    if (mgr_queue      == nullptr) mgr_queue      = xQueueCreate(5, sizeof(MgrQueueData));
+
+    // Reply queues from StateTask back to the foreground caller.
+    // Depth 2 on stopped_queue is enough — stop_document is the
+    // only consumer and at most one STOPPED is ever in flight.
+    if (asap_queue     == nullptr) asap_queue     = xQueueCreate(5, sizeof(MgrQueueData));
+    if (stopped_queue  == nullptr) stopped_queue  = xQueueCreate(2, sizeof(MgrQueueData));
     if (state_queue    == nullptr) state_queue    = xQueueCreate(5, sizeof(StateQueueData));
     if (retrieve_queue == nullptr) retrieve_queue = xQueueCreate(5, sizeof(RetrieveQueueData));
 
@@ -844,8 +882,14 @@ PageLocs::retrieve_asap(int16_t itemref_index)
   relax = true;
   MgrQueueData mgr_queue_data;
   LOG_D("==> Waiting for answer... <==");
-  QUEUE_RECEIVE(mgr_queue, mgr_queue_data, portMAX_DELAY);
-  LOG_D("-> %s <-", mgr_queue_data.req == MgrReq::ASAP_READY ? "ASAP_READY" : "ERROR!!!");
+  // asap_queue carries only ASAP_READY; STOPPED replies go to
+  // stopped_queue. The mismatch case the original "ERROR!!!" log
+  // guarded against can no longer occur structurally. Logging
+  // the .req field anyway (always "ASAP_READY") keeps the trace
+  // shape stable for any external log-watcher and earns the
+  // discriminator field its keep.
+  QUEUE_RECEIVE(asap_queue, mgr_queue_data, portMAX_DELAY);
+  LOG_D("-> %s <-", (mgr_queue_data.req == MgrReq::ASAP_READY) ? "ASAP_READY" : "?");
   relax = false;
 
   return true;
@@ -866,8 +910,12 @@ PageLocs::stop_document()
 
   MgrQueueData mgr_queue_data;
   LOG_D("==> Waiting for STOPPED... <==");
-  QUEUE_RECEIVE(mgr_queue, mgr_queue_data, portMAX_DELAY);
-  LOG_D("-> %s <-", (mgr_queue_data.req == MgrReq::STOPPED) ? "STOPPED" : "ERROR!!!");
+  // stopped_queue carries only STOPPED; ASAP_READY replies go to
+  // asap_queue. No reply-type mismatch is possible — the receive
+  // either delivers a STOPPED or blocks forever (which would
+  // indicate a missing send, not a wrong-type send).
+  QUEUE_RECEIVE(stopped_queue, mgr_queue_data, portMAX_DELAY);
+  LOG_D("-> %s <-", (mgr_queue_data.req == MgrReq::STOPPED) ? "STOPPED" : "?");
 
   // Retriever is now confirmed idle; safe to free the per-item state
   // it was working on. Without this, item_info.xml_doc + css_cache +
