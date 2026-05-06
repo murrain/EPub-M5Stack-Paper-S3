@@ -126,11 +126,24 @@ LinearBooksDirViewer::show_page(int16_t page_nbr, int16_t hightlight_item_idx)
   }
 
   ScreenBottom::show(page_nbr, page_count);
-  
-  page.paint();
+
+  // Region paint: clear+commit only the books area (y >=
+  // first_entry_ypos). The persistent menu strip above stays
+  // exactly as it was — both in the framebuffer and on the
+  // panel — so a page-nav refresh doesn't flicker or wipe the
+  // strip. screen.update_region forwards to a full update when
+  // s_force_full / s_warm_wake_clear_pending is armed (initial
+  // DIR entry from cold/warm boot), so the first paint after
+  // those flags still does a full GC16; subsequent page navs
+  // are partial.
+  const int16_t header = BooksDirViewer::get_header_height();
+  page.paint_region(
+    Pos(0, header),
+    Dim(Screen::get_width(), Screen::get_height() - header),
+    Screen::UpdateMode::BUDGETED);
 }
 
-void 
+void
 LinearBooksDirViewer::highlight(int16_t item_idx)
 {
   #if !(INKPLATE_6PLUS || TOUCH_TRIAL)

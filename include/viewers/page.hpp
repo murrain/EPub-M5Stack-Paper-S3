@@ -323,6 +323,43 @@ class Page
      */
     void paint_to_active_target(bool clear_screen = false, bool do_it = false);
 
+    /**
+     * @brief Paint the display list and commit ONLY the specified
+     *        screen region — leaving the rest of the panel
+     *        untouched (no waveform update, no flicker).
+     *
+     * Used by callers that share the screen with a persistent
+     * overlay (e.g. BooksDirViewer's books area underneath the
+     * persistent menu strip): the books-area pixels need to
+     * change but the strip's pixels — both in the framebuffer
+     * and on the panel — must stay exactly as-is. paint() can't
+     * do this: its screen.clear() wipes the entire framebuffer
+     * and screen.update() drives a full-panel waveform that
+     * flickers the strip.
+     *
+     * Behavior:
+     *   1. (optional) Clear the framebuffer inside the region
+     *      to white, leaving pixels OUTSIDE the region intact.
+     *   2. Emit the display list (caller is responsible for
+     *      drawing only inside the region; out-of-region draw
+     *      operations would write into preserved pixels).
+     *   3. Commit via screen.update_region for the region only.
+     *
+     * @param region_pos   Top-left of the region (logical coords).
+     * @param region_dim   Width × height of the region.
+     * @param mode         Waveform mode for the partial update.
+     * @param clear_region If true, fill the region with white in
+     *                     the framebuffer before emitting the
+     *                     display list. Default true matches the
+     *                     "render fresh content" use case.
+     * @param do_it        Do the painting regardless of compute
+     *                     mode (matches paint()).
+     */
+    void paint_region(Pos region_pos, Dim region_dim,
+                      Screen::UpdateMode mode,
+                      bool clear_region = true,
+                      bool do_it        = false);
+
     void show_fmt(const Format & fmt, const char * spaces) const {
       #if DEBUGGING
         std::cout       << spaces                  <<

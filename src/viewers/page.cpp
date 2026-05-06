@@ -379,6 +379,29 @@ Page::paint_to_active_target(bool clear_screen, bool do_it)
   emit_display_list(clear_screen, do_it);
 }
 
+// Region paint: clear-and-render confined to a rectangle, with
+// a partial commit. See header for the BooksDirViewer use case
+// (keep the persistent menu strip untouched while re-rendering
+// the books area underneath).
+void
+Page::paint_region(Pos region_pos, Dim region_dim,
+                   Screen::UpdateMode mode,
+                   bool clear_region, bool do_it)
+{
+  if (clear_region) {
+    // White-fill ONLY the region in the framebuffer. Pixels
+    // outside the region (the strip area, on a books-dir
+    // page-nav repaint) stay as they were.
+    screen.draw_rectangle(region_dim, region_pos, Screen::WHITE_COLOR);
+  }
+  // Emit the display list with NO global clear — the targeted
+  // clear above handles the "render fresh content" need.
+  emit_display_list(/*clear_screen=*/false, do_it);
+  // Commit only the region's pixels. Strip-area panel pixels
+  // are not part of this update's waveform and don't flicker.
+  screen.update_region(region_pos, region_dim, mode);
+}
+
 void
 Page::start(const Format & fmt)
 {

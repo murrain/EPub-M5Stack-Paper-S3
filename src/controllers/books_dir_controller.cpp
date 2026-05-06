@@ -376,19 +376,17 @@ BooksDirController::leave(bool going_to_deep_sleep)
 
     switch (event.kind) {
       case EventMgr::EventKind::SWIPE_RIGHT:
-        // Page nav repaints the books area via a full-screen
-        // page.paint() inside show_page(), which wipes the
-        // persistent menu strip along with it. Re-show the strip
-        // after to restore the books-dir UI. Same pattern as the
-        // sub-state-completion re-render at the top of input_event.
+        // No strip restore needed — show_page now uses
+        // page.paint_region to clear + commit only the books
+        // area, leaving the strip's framebuffer + panel pixels
+        // untouched. The earlier show_menu() call here was a
+        // workaround for the strip being wiped by show_page's
+        // full-screen page.paint(); that's no longer the case.
         current_book_index = books_dir_viewer->prev_page();
-        option_controller.show_menu();
         break;
 
       case EventMgr::EventKind::SWIPE_LEFT:
-        // Strip restore — same reason as SWIPE_RIGHT above.
         current_book_index = books_dir_viewer->next_page();
-        option_controller.show_menu();
         break;
 
       case EventMgr::EventKind::TAP:
