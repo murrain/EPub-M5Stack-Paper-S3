@@ -358,8 +358,23 @@ BookController::open_book_file(
         break;
       
       case EventMgr::EventKind::TAP:
-        if (event.y < (Screen::get_height() - 40)) {
-          if (event.x < (Screen::get_width() / 3)) {
+        // New touch grammar (user request):
+        //   y < TOP_EDGE_PX             → menu (PARAM controller)
+        //   y ≥ TOP_EDGE_PX, x < width/3 → previous page
+        //   y ≥ TOP_EDGE_PX, x > 2/3 w   → next page
+        //   y ≥ TOP_EDGE_PX, center 1/3  → dead space (no-op)
+        //
+        // Removes the previous "tap anywhere → menu" path that
+        // accidentally triggered the menu when the user wanted to
+        // tap-advance a page in the center column. The top-edge
+        // strip is still big enough (80 px / ~10% of the panel
+        // height) to hit reliably without obscuring book content.
+        {
+          constexpr uint16_t TOP_EDGE_PX = 80;
+          if (event.y < TOP_EDGE_PX) {
+            app_controller.set_controller(AppController::Ctrl::PARAM);
+          }
+          else if (event.x < (Screen::get_width() / 3)) {
             page_id = page_locs.get_prev_page_id(current_page_id);
             if (page_id != nullptr) {
               current_page_id.itemref_index = page_id->itemref_index;
@@ -374,14 +389,26 @@ BookController::open_book_file(
               current_page_id.offset        = page_id->offset;
               show_and_capture(current_page_id);
             }
-          } else {           
-            app_controller.set_controller(AppController::Ctrl::PARAM);
           }
-        } else {           
-          app_controller.set_controller(AppController::Ctrl::PARAM);
+          // else: center third / bottom region → intentional no-op.
         }
         break;
-        
+
+      case EventMgr::EventKind::SWIPE_DOWN:
+        // Pull-down-from-top "drawer" gesture for the menu.
+        // Filtered by start-y so a vertical drag in the middle of
+        // the page (which is unusual but possible on accidental
+        // contact) doesn't trigger the menu. event.y is the touch
+        // start position — see event_mgr_paper_s3.cpp where the
+        // FSM stores start_x / start_y on first contact.
+        {
+          constexpr uint16_t TOP_PULL_REGION_PX = 80;
+          if (event.y < TOP_PULL_REGION_PX) {
+            app_controller.set_controller(AppController::Ctrl::PARAM);
+          }
+        }
+        break;
+
       default:
         break;
     }
