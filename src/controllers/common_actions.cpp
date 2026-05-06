@@ -63,25 +63,49 @@ CommonActions::power_it_off()
     #define INT_PIN ((gpio_num_t)0)
   #endif
 
-  app_controller.going_to_deep_sleep();
   #if EPUB_INKPLATE_BUILD
-    // Render the sleep screen as the LAST frame the panel sees. e-ink
-    // retains it without power for the duration of deep sleep. The
-    // sleep_screen_viewer triggers its own full GC16 refresh so the
-    // panel is in a clean state for long retention.
+    // Paint the sleep screen FIRST, before the slow cleanup work
+    // below. Reasoning: the user just tapped "Power Off" and
+    // expects immediate feedback. With sleep_screen.show running
+    // last, the device sat with the menu still on screen for ~2-
+    // 3 s of wake_snapshot.persist + page_cache teardown — which
+    // looked exactly like a freeze. Painting the wallpaper first
+    // gives instant "device went to sleep" confirmation; the
+    // teardown work then runs invisibly behind the already-
+    // committed final frame.
+    //
+    // Safe ordering: by the time we get here from the option-
+    // menu, the user already left BOOK (BookController::leave
+    // fired on the transition into OPTION), which triggered
+    // page_cache.pause(). So pre-paint pthread is quiesced —
+    // SleepScreenViewer's paint won't race the ScopedRenderTarget
+    // assertion.
     SleepScreenViewer::show();
-    // Give the GC16 waveform time to fully clock out (~600 ms) before
-    // we cut the e-paper rail. epdiy's high-level update is synchronous
-    // for the framebuffer commit but the panel-side waveform continues;
-    // a too-short delay here can leave a half-rendered sleep screen
-    // visible for the entire deep-sleep duration.
-    ESP::delay(800);
+
+    // Now the heavy-lifting cleanup. wake_snapshot.persist alone
+    // is ~1-2 s of SD write, page_cache.stop joins the pthread,
+    // page_locs.stop_document blocks on STOPPED ack, controllers
+    // each save their last-state. All of this runs while the
+    // panel's GC16 waveform from sleep_screen.show is still
+    // clocking out — they overlap and the user sees only the
+    // wallpaper throughout.
+    app_controller.going_to_deep_sleep();
+
+    // Tail delay — only if the cleanup above somehow completed
+    // before the ~700 ms GC16 waveform did. With persist in the
+    // path that's effectively impossible, but a small defensive
+    // delay costs nothing and protects against future paths
+    // where cleanup is faster (e.g. a sleep from the books-dir
+    // with no book open and no cache to persist).
+    ESP::delay(200);
+
     // Persist the deep-sleep marker AFTER all rendering is committed
     // and just before the actual sleep call. Anything that goes wrong
     // before this point still leaves the next boot in cold-boot state.
     SessionState::mark_entering_deep_sleep();
     inkplate_platform.deep_sleep(INT_PIN, LEVEL);
   #else
+    app_controller.going_to_deep_sleep();
     extern void exit_app();
     exit_app();
     exit(0);
