@@ -204,10 +204,27 @@ MatrixBooksDirViewer::show_page(int16_t page_nbr, int16_t hightlight_item_idx)
 
   ScreenBottom::show(current_page_nbr, page_count);
 
-  page.paint();
+  // Region paint: clear+commit only the books area. The
+  // persistent menu strip above stays exactly as it was. The
+  // title/author header band sits at title_area_top (below
+  // get_header_height()), inside the books region — gets
+  // cleared + redrawn correctly on each show_page.
+  //
+  // Invariant for this method: every draw operation above must
+  // emit at y >= get_header_height(). If a future change adds
+  // a draw at y < header, it'll silently corrupt the strip's
+  // framebuffer pixels (paint_region preserves them).
+  //
+  // screen.update_region forwards to full update() when
+  // s_force_full / s_warm_wake_clear_pending is armed (initial
+  // DIR entry from boot), so the first paint cleanly inits the
+  // panel; subsequent page navs are partial.
+  Pos region_pos; Dim region_dim;
+  BooksDirViewer::get_books_region(region_pos, region_dim);
+  page.paint_region(region_pos, region_dim, Screen::UpdateMode::BUDGETED);
 }
 
-void 
+void
 MatrixBooksDirViewer::highlight(int16_t item_idx)
 {
   int16_t book_idx,
