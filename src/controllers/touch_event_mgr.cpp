@@ -18,8 +18,9 @@
 #include "viewers/page.hpp"
 #include "models/config.hpp"
 
-const char * EventMgr::event_str[8] = { "NONE",        "TAP",           "HOLD",         "SWIPE_LEFT", 
-                                        "SWIPE_RIGHT", "PINCH_ENLARGE", "PINCH_REDUCE", "RELEASE"    };
+const char * EventMgr::event_str[10] = { "NONE",        "TAP",           "HOLD",         "SWIPE_LEFT",
+                                         "SWIPE_RIGHT", "PINCH_ENLARGE", "PINCH_REDUCE", "RELEASE",
+                                         "SWIPE_DOWN",  "SWIPE_UP"                                   };
 
 
 #if EPUB_INKPLATE_BUILD

@@ -151,6 +151,7 @@ static void touch_task(void * param)
   uint16_t   current_y      = 0;
   TickType_t start_tick     = 0;
   int        max_signed_dx  = 0;  // peak signed X displacement during touch
+  int        max_signed_dy  = 0;  // peak signed Y displacement during touch
   int        max_abs_dy     = 0;  // peak |Y| displacement during touch
 
   while (true) {
@@ -178,6 +179,7 @@ static void touch_task(void * param)
         start_x        = current_x = x;
         start_y        = current_y = y;
         max_signed_dx  = 0;
+        max_signed_dy  = 0;
         max_abs_dy     = 0;
       }
       else {
@@ -189,16 +191,20 @@ static void touch_task(void * param)
       // Track peak displacement seen during this touch. The classifier on
       // release uses these instead of endpoint deltas so a swipe that
       // partly returns or whose final sample missed the peak still
-      // registers correctly.
+      // registers correctly. Both signed peaks (max_signed_dx, max_
+      // signed_dy) preserve direction so SWIPE_LEFT vs RIGHT and
+      // SWIPE_UP vs DOWN can be distinguished on release.
       {
-        int cur_dx     = (int)current_x - (int)start_x;
-        int cur_abs_dy = (int)current_y - (int)start_y;
-        if (cur_abs_dy < 0) cur_abs_dy = -cur_abs_dy;
+        int cur_dx = (int)current_x - (int)start_x;
+        int cur_dy = (int)current_y - (int)start_y;
 
         int abs_cur_dx     = cur_dx >= 0 ? cur_dx : -cur_dx;
+        int abs_cur_dy     = cur_dy >= 0 ? cur_dy : -cur_dy;
         int abs_max_dx_now = max_signed_dx >= 0 ? max_signed_dx : -max_signed_dx;
+        int abs_max_dy_now = max_signed_dy >= 0 ? max_signed_dy : -max_signed_dy;
         if (abs_cur_dx > abs_max_dx_now) max_signed_dx = cur_dx;
-        if (cur_abs_dy > max_abs_dy)     max_abs_dy    = cur_abs_dy;
+        if (abs_cur_dy > abs_max_dy_now) max_signed_dy = cur_dy;
+        if (abs_cur_dy > max_abs_dy)     max_abs_dy    = abs_cur_dy;
       }
 
       // Detect a long press while the finger is still down.
@@ -245,11 +251,13 @@ static void touch_task(void * param)
 
         int abs_max_dx = max_signed_dx >= 0 ? max_signed_dx : -max_signed_dx;
 
+        int abs_max_dy_signed = max_signed_dy >= 0 ? max_signed_dy : -max_signed_dy;
+
         if (hold_sent) {
           ev.kind = EventMgr::EventKind::RELEASE;
         }
-        else if (abs_max_dx > max_abs_dy) {
-          // Predominantly horizontal motion — candidate for swipe.
+        else if (abs_max_dx > abs_max_dy_signed) {
+          // Predominantly horizontal motion — candidate for left/right swipe.
           bool meets_distance = abs_max_dx > (int)swipe_distance_threshold;
           bool meets_velocity = (abs_max_dx > (int)swipe_velocity_min_dx)
                              && (dt_ms      < swipe_velocity_max_dt_ms);
@@ -257,6 +265,22 @@ static void touch_task(void * param)
           if (meets_distance || meets_velocity) {
             ev.kind = (max_signed_dx > 0) ? EventMgr::EventKind::SWIPE_RIGHT
                                           : EventMgr::EventKind::SWIPE_LEFT;
+          } else {
+            ev.kind = EventMgr::EventKind::TAP;
+          }
+        }
+        else if (abs_max_dy_signed > abs_max_dx) {
+          // Predominantly vertical motion — candidate for down/up swipe.
+          // Reuses the same distance + velocity thresholds as the
+          // horizontal classifier; the gesture grammar should feel
+          // consistent across axes.
+          bool meets_distance = abs_max_dy_signed > (int)swipe_distance_threshold;
+          bool meets_velocity = (abs_max_dy_signed > (int)swipe_velocity_min_dx)
+                             && (dt_ms             < swipe_velocity_max_dt_ms);
+
+          if (meets_distance || meets_velocity) {
+            ev.kind = (max_signed_dy > 0) ? EventMgr::EventKind::SWIPE_DOWN
+                                          : EventMgr::EventKind::SWIPE_UP;
           } else {
             ev.kind = EventMgr::EventKind::TAP;
           }
