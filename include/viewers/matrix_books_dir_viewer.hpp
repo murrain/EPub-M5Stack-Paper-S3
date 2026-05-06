@@ -50,7 +50,8 @@ class MatrixBooksDirViewer : public BooksDirViewer
 
   public:
 
-    MatrixBooksDirViewer() : current_item_idx(-1), current_page_nbr(-1) {}
+    MatrixBooksDirViewer() : current_item_idx(-1), current_page_nbr(-1),
+                             first_entry_ypos(0), title_area_top(0) {}
     
     void setup();
     
