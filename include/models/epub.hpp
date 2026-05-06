@@ -140,6 +140,7 @@ class EPub
     inline const char *                    get_description()       { return get_meta("dc:description");      }
     inline const pugi::xml_document &     get_current_item() const { return current_item_info.xml_doc;       }
     inline std::string                get_current_filename()       { return current_filename;                }
+    inline bool                              is_file_open() const { return file_is_open;                    }
     inline bool                          filename_is_empty()       { return current_filename.empty();        }
     inline BookParams *                    get_book_params()       { return book_params;                     }
     inline BookFormatParams *       get_book_format_params()       { return &book_format_params;             }
