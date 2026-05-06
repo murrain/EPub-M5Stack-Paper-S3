@@ -156,6 +156,19 @@ class PageCache
     const uint8_t * get(const PageLocs::PageId & page_id,
                         uint32_t current_format_hash);
 
+    // For Phase C warm-wake hydration: copy a pre-rendered page
+    // bitmap (read from the multi-page WakeSnapshot file) directly
+    // into a free cache slot, bypassing the pre-paint pthread.
+    // Marks the entry complete so subsequent get() calls hit it.
+    // Returns true on success, false if there's no free slot or
+    // size mismatch. Caller (WakeSnapshot::hydrate_page_cache)
+    // checks return + falls back to "let pre-paint repopulate
+    // organically as user navigates."
+    bool inject_entry(const PageLocs::PageId & page_id,
+                      uint32_t format_hash,
+                      const uint8_t * source_fb,
+                      size_t source_size);
+
     // For Phase C: snapshot all complete entries under one
     // cache-mutex acquisition. The caller (WakeSnapshot v2) then
     // serializes them to SD. Output buffer must hold up to

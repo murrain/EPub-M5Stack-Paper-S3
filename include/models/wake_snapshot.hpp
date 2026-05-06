@@ -44,27 +44,53 @@ class WakeSnapshot
   public:
     static constexpr char const * SNAPSHOT_PATH = "/sdcard/.wake_snapshot.bin";
 
-    // File header. Persisted verbatim ahead of the raw framebuffer
-    // bytes. Sized to a multiple of 4 so the framebuffer body lands on
-    // an aligned offset.
+    // File header v2 (Stage 2 Phase C: multi-page). The single-
+    // page v1 fields (itemref_index / page_offset / fb_crc) move
+    // into a per-entry PageEntryMeta array that follows the
+    // header; v2 carries shared metadata (book_id, format_hash,
+    // geometry) plus a count of how many entries follow.
+    //
+    // File layout:
+    //    [Header]                 32 bytes
+    //    [PageEntryMeta][page_count]   12 * N bytes
+    //    [Framebuffer ][page_count]   fb_size * N bytes
+    //
+    // Entry 0 is ALWAYS the "primary" page — the one to paint on
+    // warm wake. Entries 1..N-1 are pre-paint cache snapshots that
+    // get hydrated into PageCache after BookController::open_book_
+    // file runs. format_hash is shared (the cache invariant
+    // enforced upstream by invalidate-on-format-edit) so we don't
+    // pay 4 bytes per entry to repeat it.
+    //
+    // v1 compatibility: a v1 file fails the version check on read
+    // and is silently ignored (the warm-wake path falls back to
+    // normal book-open rendering). v1 files were short-lived and
+    // only contained one page anyway, so the loss is one wake
+    // worth of "instant page paint" UX, recovered on the next
+    // sleep when the persist writes a fresh v2 file.
     struct Header
     {
       uint32_t magic;          ///< MAGIC, sanity check on read.
       uint32_t version;        ///< Bump on any incompatible field change.
       uint32_t book_id;        ///< NVS book id at capture time.
-      int16_t  itemref_index;  ///< PageId.itemref_index
-      int16_t  reserved0;      ///< padding to 4-byte align next field
-      int32_t  page_offset;    ///< PageId.offset
-      uint32_t format_hash;    ///< Hash of book_format_params at capture.
+      uint32_t format_hash;    ///< Shared across all entries.
       int16_t  fb_width;       ///< Physical landscape width (960 on PaperS3).
       int16_t  fb_height;      ///< Physical landscape height (540).
       int8_t   fb_bpp;         ///< 4 (4-bit packed grayscale)
-      int8_t   reserved1[3];
-      uint32_t fb_size;        ///< Bytes of framebuffer payload following.
-      uint32_t fb_crc;         ///< CRC-32 of the framebuffer payload.
+      int8_t   reserved0[3];
+      uint32_t fb_size;        ///< Bytes per entry framebuffer.
+      uint16_t page_count;     ///< 1 (primary only) up to SLOT_COUNT+1.
+      uint16_t reserved1;
+    };
+    struct PageEntryMeta
+    {
+      int16_t  itemref_index;
+      int16_t  reserved0;      ///< 4-byte align next field
+      int32_t  page_offset;
+      uint32_t fb_crc;         ///< CRC-32 of this entry's framebuffer.
     };
     static constexpr uint32_t MAGIC   = 0xFEEDFACEu;
-    static constexpr uint32_t VERSION = 1u;
+    static constexpr uint32_t VERSION = 2u;
 
     WakeSnapshot();
     ~WakeSnapshot();
@@ -95,6 +121,27 @@ class WakeSnapshot
     bool restore_to_panel(uint32_t * book_id_out,
                           PageLocs::PageId * page_id_out,
                           uint32_t * format_hash_out);
+
+    // Phase C: after BookController::open_book_file has called
+    // page_cache.start() but BEFORE the first show_and_capture
+    // fires, read all NON-primary entries from the snapshot file
+    // and inject them into PageCache. Each successful inject_entry
+    // call gives the user one more page they can swipe to instantly
+    // post-wake without waiting for the pre-paint task.
+    //
+    // expected_book_id and expected_format_hash gate the load:
+    // mismatch (e.g. user wakes-then-immediately-opens-different-
+    // book) causes hydrate to skip — those bitmaps wouldn't match
+    // the current render anyway. Caller passes the values for the
+    // book it just opened.
+    //
+    // Returns the number of entries successfully injected. Zero
+    // is a benign result (no file, version mismatch, all entries
+    // already in PageCache, etc.) — the user just doesn't get the
+    // multi-page wake bonus this session, but the primary page is
+    // already painted (via restore_to_panel earlier on mainTask).
+    size_t hydrate_page_cache(uint32_t expected_book_id,
+                              uint32_t expected_format_hash);
 
     // Discard the on-disk snapshot file AND drop the in-memory
     // capture. Caller hook status:
@@ -148,10 +195,17 @@ class WakeSnapshot
     // budget and it stays resident for the session — re-allocating
     // on every capture would mean repeated PSRAM heap churn for no
     // gain.
-    uint8_t * fb_cache_;
-    size_t    fb_cache_size_;
-    bool      captured_;
-    Header    cached_header_;
+    uint8_t *      fb_cache_;
+    size_t         fb_cache_size_;
+    bool           captured_;
+    // v2 split: shared header fields stay in cached_header_; the
+    // per-page metadata (itemref/offset/CRC) for the primary page
+    // moves to cached_primary_meta_. persist() writes
+    // cached_header_ (page_count = 1 + cached pages from
+    // PageCache), then cached_primary_meta_, then PageCache's
+    // PageEntryMeta entries, then framebuffers.
+    Header         cached_header_;
+    PageEntryMeta  cached_primary_meta_;
 
     static uint32_t crc32(const uint8_t * data, size_t len);
 };
