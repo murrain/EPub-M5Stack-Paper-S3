@@ -38,13 +38,6 @@ class MenuViewer
     void  show(MenuEntry * the_menu, uint8_t entry_index = 0, bool clear_screen = false);
     bool event(const EventMgr::Event & event);
     void clear_highlight();
-
-    // Computed at show() time from font metrics; consumed by
-    // BooksDirController to verify the strip fits within the
-    // header area it reserves on the books-dir screen. Run-time
-    // check rather than static_assert because the height comes
-    // out of font line-height arithmetic, not a constexpr.
-    inline uint16_t get_region_height() const { return region_height; }
     
   private:
     static constexpr char const * TAG = "MenuViewer";

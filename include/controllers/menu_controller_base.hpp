@@ -56,20 +56,5 @@ class MenuControllerBase
     // active. Only called when has_active_sub_state() returned
     // true. The sub-state owns the event entirely — no fall-
     // through to the menu viewer when this is invoked.
-    //
-    // skip_strip_refresh: when true, the implementation must
-    // not call menu_viewer.show or menu_viewer.clear_highlight
-    // on sub-state-completion paths. The caller (typically
-    // BooksDirController in the persistent-strip flow) will
-    // re-render the screen — including the strip — once the
-    // sub-state ends. Without this flag the in-dispatch refresh
-    // commits a partial strip update that the outer re-render
-    // immediately overwrites, costing one wasted EPD refresh
-    // cycle per sub-state completion. Default false preserves
-    // the modal AppController-state callers (button builds, in-
-    // book menu) where the in-dispatch refresh IS the only
-    // thing that re-shows the strip after a form completes.
-    virtual void dispatch_to_sub_state(
-      const EventMgr::Event & event,
-      bool                    skip_strip_refresh = false) = 0;
+    virtual void dispatch_to_sub_state(const EventMgr::Event & event) = 0;
 };
