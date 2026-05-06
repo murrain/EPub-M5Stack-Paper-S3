@@ -92,7 +92,16 @@ class OptionController : public MenuControllerBase
       #endif
     }
 
-  protected:
+    // Public on this derived class — BooksDirController calls
+    // them directly on the global option_controller instance
+    // for the persistent-strip dispatch (see BooksDirController
+    // ::input_event). Conceptually still implementation details
+    // of MenuControllerBase's dispatch envelope (they remain
+    // protected on the base — the modal callers reach them via
+    // base-class internal dispatch), but OptionController has
+    // an additional consumer outside the hierarchy: the screen
+    // that hosts the menu as a header. C++ allows widening the
+    // access level on override, which is exactly the intent.
     bool has_active_sub_state() const override;
     void dispatch_to_sub_state(
       const EventMgr::Event & event,

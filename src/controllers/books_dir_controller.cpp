@@ -293,27 +293,24 @@ BooksDirController::enter()
 
   #if (INKPLATE_6PLUS || TOUCH_TRIAL)
     // Paint the option menu as a persistent header strip on top
-    // of the just-rendered books area. The books viewer reserves
-    // BooksDirViewer::HEADER_RESERVED_HEIGHT at the top so the
-    // strip sits in unrendered (white) space — no overlap with
-    // book covers or list rows. Strip taps are dispatched inline
-    // by input_event below (no transition to a separate OPTION
-    // controller state). menu_viewer.show() commits via partial
-    // update_region for the strip area only — the just-painted
-    // books area stays put on the panel.
+    // of the just-rendered books area. The books viewer's
+    // first_entry_ypos was sized using BooksDirViewer::
+    // get_header_height() so the strip sits in unrendered
+    // (white) space — no overlap with book covers or list rows.
+    // Strip taps are dispatched inline by input_event below
+    // (no transition to a separate OPTION controller state).
+    // menu_viewer.show() commits via partial update_region for
+    // the strip area only — the just-painted books area stays
+    // put on the panel.
     option_controller.show_menu();
 
-    // Geometry sanity check: the strip's actual rendered height
-    // (computed at show() time from font metrics) must fit
-    // inside the area the books viewer reserves. A font tweak
-    // or ICON_SIZE change could silently grow the strip past
-    // HEADER_RESERVED_HEIGHT, which would let it bleed into
-    // the book grid (the strip's update_region commits its own
-    // area, but the books viewer would have drawn books over
-    // the bottom of the strip on the previous full update).
-    // Assert is the right gate — drift here is a bug to fix at
-    // the constant, not at runtime.
-    assert(menu_viewer.get_region_height() <= BooksDirViewer::HEADER_RESERVED_HEIGHT);
+    // Drift assert: get_header_height() (the static formula
+    // mirror) and get_region_height() (the value computed
+    // inside show()) must agree. If they ever disagree, the
+    // formula in MenuViewer::compute_region_height has drifted
+    // from MenuViewer::show — fix the formula, not the assert.
+    // Both run after fonts load, so this is a tight equality.
+    assert(menu_viewer.get_region_height() == BooksDirViewer::get_header_height());
   #endif
 }
 
@@ -357,14 +354,15 @@ BooksDirController::leave(bool going_to_deep_sleep)
       return;
     }
 
-    // Tap on the persistent menu strip (top HEADER_RESERVED_HEIGHT
-    // pixels) → fire the icon's action callback inline. Action may
-    // set a sub-state flag on OptionController; the next event
-    // routes to the dispatch above. The strip area never holds
-    // books (the books viewers reserve this space), so a tap here
-    // is unambiguously menu, never a book selection.
+    // Tap on the persistent menu strip (top get_header_height()
+    // pixels) → fire the icon's action callback inline. Action
+    // may set a sub-state flag on OptionController; the next
+    // event routes to the dispatch above. The strip area never
+    // holds books (the books viewers reserve this space at
+    // setup() time using the same get_header_height value), so
+    // a tap here is unambiguously menu, never a book selection.
     if (event.kind == EventMgr::EventKind::TAP &&
-        event.y < BooksDirViewer::HEADER_RESERVED_HEIGHT) {
+        event.y < BooksDirViewer::get_header_height()) {
       menu_viewer.event(event);
       // For direct actions (refresh books, return to last book)
       // the action transitions out of DIR via set_controller, so
@@ -387,7 +385,7 @@ BooksDirController::leave(bool going_to_deep_sleep)
 
       case EventMgr::EventKind::TAP:
         // Universal hit-test on the books area (y >=
-        // HEADER_RESERVED_HEIGHT, after the early return above).
+        // get_header_height(), after the early return above).
         // LinearBooksDirViewer::get_index_at hits the full row
         // width — see include/viewers/linear_books_dir_viewer
         // .hpp::get_index_at — so a tap on the title or author

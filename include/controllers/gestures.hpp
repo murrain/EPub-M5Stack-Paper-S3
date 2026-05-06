@@ -40,7 +40,7 @@ namespace Gestures {
     // reading screen, where the menu is a transient drawer.
     // The books-dir screen does NOT use this — its menu is a
     // persistent header strip and tap dispatch is geometric
-    // (y < HEADER_RESERVED_HEIGHT → menu strip; otherwise
+    // (y < get_header_height() → menu strip; otherwise
     // book hit-test). See BooksDirController::input_event.
     inline bool is_menu_open(const EventMgr::Event & e) {
       return (e.kind == EventMgr::EventKind::TAP ||

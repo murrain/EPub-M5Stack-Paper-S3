@@ -22,7 +22,12 @@
 void
 LinearBooksDirViewer::setup()
 {
-  books_per_page = (Screen::get_height() - FIRST_ENTRY_YPOS - 20 + SPACE_BETWEEN_ENTRIES) / 
+  // Header height is dynamic on touch builds (depends on menu
+  // strip's actual rendered height). Resolve it now so layout
+  // math below uses a single coherent value.
+  first_entry_ypos = BooksDirViewer::get_header_height() + 5;
+
+  books_per_page = (Screen::get_height() - first_entry_ypos - 20 + SPACE_BETWEEN_ENTRIES) /
                    (BooksDir::max_cover_height + SPACE_BETWEEN_ENTRIES);
   page_count = (books_dir.get_book_count() + books_per_page - 1) / books_per_page;
 
@@ -47,7 +52,7 @@ LinearBooksDirViewer::show_page(int16_t page_nbr, int16_t hightlight_item_idx)
   if (last > books_dir.get_book_count()) last = books_dir.get_book_count();
 
   int16_t xpos = 20 + BooksDir::max_cover_width;
-  int16_t ypos = FIRST_ENTRY_YPOS;
+  int16_t ypos = first_entry_ypos;
 
   Page::Format fmt = {
       .line_height_factor =   0.8,
@@ -138,7 +143,7 @@ LinearBooksDirViewer::highlight(int16_t item_idx)
     int16_t book_idx = current_page_nbr * books_per_page + current_item_idx;
 
     int16_t xpos = 20 + BooksDir::max_cover_width;
-    int16_t ypos = FIRST_ENTRY_YPOS + (current_item_idx * (BooksDir::max_cover_height + SPACE_BETWEEN_ENTRIES));
+    int16_t ypos = first_entry_ypos + (current_item_idx * (BooksDir::max_cover_height + SPACE_BETWEEN_ENTRIES));
 
     const BooksDir::EBookRecord * book = books_dir.get_book_data(book_idx);
 
@@ -197,7 +202,7 @@ LinearBooksDirViewer::highlight(int16_t item_idx)
     current_item_idx = item_idx;
 
     book_idx = current_page_nbr * books_per_page + current_item_idx;
-    ypos = FIRST_ENTRY_YPOS + (current_item_idx * (BooksDir::max_cover_height + 6));
+    ypos = first_entry_ypos + (current_item_idx * (BooksDir::max_cover_height + 6));
 
     book = books_dir.get_book_data(book_idx);
 

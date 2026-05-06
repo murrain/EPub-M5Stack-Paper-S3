@@ -7,23 +7,38 @@
 
 #include "models/books_dir.hpp"
 #include "viewers/page.hpp"
+#include "viewers/menu_viewer.hpp"
 
 class BooksDirViewer
 {
   public:
     // Top region reserved for the persistent menu strip on touch
-    // builds (Inkplate-6plus / TOUCH_TRIAL / PaperS3). The menu
-    // is always shown as a header on the books-dir screen, so
-    // both viewers shift book layout below this height. Button-
-    // only builds keep the menu modal (no permanent strip), so
-    // the reservation is zero. Keep this in lockstep with
-    // Gestures::TOP_EDGE_PX — they describe the same geometry
-    // (the menu strip's footprint and tap-hit region).
-    #if (INKPLATE_6PLUS || TOUCH_TRIAL)
-      static constexpr int16_t HEADER_RESERVED_HEIGHT = 80;
-    #else
-      static constexpr int16_t HEADER_RESERVED_HEIGHT = 0;
-    #endif
+    // builds (Inkplate-6plus / TOUCH_TRIAL / PaperS3). Computed
+    // dynamically from MenuViewer::compute_region_height() so the
+    // strip's rendered height (which depends on font metrics
+    // for the icon glyph and caption line) is always honored.
+    //
+    // Why dynamic: an earlier static `constexpr int16_t ... = 80`
+    // bootlooped on PaperS3 because the drawings.otf icon font
+    // at ICON_SIZE=15 plus the caption line at CAPTION_SIZE=12
+    // rendered larger than 80 px, tripping the layout-overflow
+    // assert on every BooksDirController::enter. The fix isn't
+    // to pick a bigger magic number — it's to query the source
+    // of truth.
+    //
+    // Button-only builds have no persistent strip and return 0;
+    // their menu is the modal OPTION controller transition.
+    //
+    // Caller must ensure fonts are loaded before invoking; safe
+    // from any controller's setup()/enter() since AppController
+    // initializes fonts before dispatching to controllers.
+    static inline uint16_t get_header_height() {
+      #if (INKPLATE_6PLUS || TOUCH_TRIAL)
+        return MenuViewer::compute_region_height();
+      #else
+        return 0;
+      #endif
+    }
 
     virtual void                        setup() = 0;
 

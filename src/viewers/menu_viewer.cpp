@@ -17,6 +17,33 @@
 
 static const std::string TOUCH_AND_HOLD_STR = "Touch and hold icon for info. Tap for action.";
 
+uint16_t MenuViewer::compute_region_height()
+{
+  // Caption line height (font index 1, CAPTION_SIZE).
+  Font * caption_font = fonts.get(1);
+  if (caption_font == nullptr) return 0;
+  uint16_t lh = caption_font->get_line_height(CAPTION_SIZE);
+
+  // Icon glyph height (drawings font, ICON_SIZE). 'A' chosen
+  // because the menu's icon font uses uppercase letters as
+  // glyph slots; height is uniform across glyphs.
+  Font * drawings_font = fonts.get(0);
+  if (drawings_font == nullptr) return 0;
+  Font::Glyph * icon = drawings_font->get_glyph('A', ICON_SIZE);
+  uint16_t ih = (icon != nullptr) ? icon->dim.height : 50;
+
+  // Layout breakdown — mirrors show():
+  //   10  top padding
+  //   ih  icon glyph
+  //   10  gap below icon
+  //   lh  caption line
+  //   20  bottom padding
+  // Any drift between this formula and show()'s math is caught
+  // by the equality assert in BooksDirController::enter — the
+  // two MUST stay in sync.
+  return 10 + ih + 10 + lh + 20;
+}
+
 void MenuViewer::show(MenuEntry * the_menu, uint8_t entry_index, bool clear_screen)
 {
   Font * font = fonts.get(1);
