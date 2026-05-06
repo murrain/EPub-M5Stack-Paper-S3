@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <mutex>
 
 // Persists a single screen-framebuffer snapshot — the last book page the
 // user was viewing — across deep sleep. On warm wake the snapshot is
@@ -95,9 +96,21 @@ class WakeSnapshot
                           PageLocs::PageId * page_id_out,
                           uint32_t * format_hash_out);
 
-    // Discard the on-disk snapshot file. Used when format params
-    // change (font size, orientation), when a different book is
-    // opened, or when we want to force a normal boot path next wake.
+    // Discard the on-disk snapshot file AND drop the in-memory
+    // capture. Expected callers (none yet wired — Stage 2 work):
+    //   - BookParamController, after epub.update_book_format_params()
+    //     fires (font size, font index, show-images toggle, etc.)
+    //   - OptionController, after orientation change
+    //   - BookController::open_book_file when a different book is
+    //     opened (book_id mismatch with the persisted snapshot)
+    //   - main.cpp warm-wake, when restore_to_panel returns a valid
+    //     snapshot whose book_id / format_hash don't match the book
+    //     the controller will re-open
+    //
+    // Until those hooks land the on-disk snapshot can occasionally
+    // get a few seconds of "wrong-format flash before the real
+    // render replaces it" UX — Stage 1 ships with that as a known
+    // limitation rather than half-wired invalidation logic.
     void invalidate();
 
     // Compute a stable hash over the BookFormatParams bytes the user
@@ -111,6 +124,15 @@ class WakeSnapshot
 
   private:
     static WakeSnapshot singleton;
+
+    // Mutual exclusion between capture() (rendering pthread, called
+    // from BookController::show_and_capture) and persist() (mainTask,
+    // called from app_controller.going_to_deep_sleep). Without this,
+    // a sleep-button press mid-memcpy would persist a torn buffer
+    // whose CRC matches but whose pixels are half-old / half-new —
+    // failing silently on the next wake. invalidate() also takes
+    // this mutex so it can't race a partial capture.
+    std::mutex mutex_;
 
     // PSRAM-backed copy of the most recent framebuffer. Allocated on
     // first capture(). 256 KB is a small fraction of the 8 MB PSRAM

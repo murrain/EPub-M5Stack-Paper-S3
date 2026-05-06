@@ -14,6 +14,7 @@
 #include "models/config.hpp"
 #include "models/page_locs.hpp"
 #include "models/toc.hpp"
+#include "models/wake_snapshot.hpp"
 #include "viewers/menu_viewer.hpp"
 #include "viewers/form_viewer.hpp"
 #include "viewers/msg_viewer.hpp"
@@ -122,10 +123,17 @@ revert_to_defaults()
   book_params->put(BookParams::Ident::FONT_SIZE,         default_value);
   book_params->put(BookParams::Ident::FONT,              default_value);
   book_params->put(BookParams::Ident::USE_FONTS_IN_BOOK, default_value);
-  
+
   epub.update_book_format_params();
 
   book_params->save();
+
+  // Format params changed: any cached wake snapshot now reflects an
+  // outdated layout. Drop both the in-memory and on-disk copies so
+  // the next wake takes the normal boot rendering path instead of
+  // flashing the stale snapshot for ~2-4 s before the real render
+  // overwrites it.
+  wake_snapshot.invalidate();
 
   msg_viewer.show(MsgViewer::MsgType::INFO, 
                   false, false, 
@@ -273,6 +281,10 @@ BookParamController::input_event(const EventMgr::Event & event)
         if (book_params->is_modified()) {
           page_locs.stop_document();
           epub.update_book_format_params();
+          // See revert_to_defaults above: format-param edits make
+          // the snapshot's layout obsolete. Drop it so warm wake
+          // takes the normal boot path instead of painting stale.
+          wake_snapshot.invalidate();
         }
 
         book_params->save();

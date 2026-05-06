@@ -90,13 +90,15 @@ class Screen : NonCopyable
     // eliminate residual ghosting from the previous book page.
     void panel_clear();
 
-    // Raw framebuffer accessors used by WakeSnapshot for save/restore.
-    // The buffer is 4-bit packed grayscale at the panel's physical
-    // landscape dimensions (960x540 on PaperS3), regardless of the
-    // logical orientation set via set_orientation. Returns nullptr/0
-    // before screen.setup has run.
-    uint8_t * get_framebuffer_for_snapshot();
-    size_t    get_framebuffer_size_for_snapshot();
+    // Raw panel-framebuffer accessors. The buffer is 4-bit packed
+    // grayscale at the panel's physical landscape dimensions
+    // (960x540 on PaperS3), regardless of the logical orientation
+    // set via set_orientation. Returns nullptr/0 before
+    // screen.setup has run. Currently used by WakeSnapshot for
+    // save/restore; the contract belongs to the provider, so the
+    // name doesn't reference any specific consumer.
+    uint8_t * get_panel_framebuffer();
+    size_t    get_panel_framebuffer_size();
 
     inline static uint16_t get_width() { return width; }
     inline static uint16_t get_height() { return height; }
@@ -230,10 +232,11 @@ class Screen : NonCopyable
     inline PixelResolution get_pixel_resolution() { return pixel_resolution; }
     inline void force_full_update() { partial_count = 0; }
 
-    // Snapshot accessors — Inkplate boards have no equivalent fast-wake
-    // story (no PMU power-cut), so the WakeSnapshot module no-ops here.
-    inline uint8_t * get_framebuffer_for_snapshot() { return nullptr; }
-    inline size_t    get_framebuffer_size_for_snapshot() { return 0; }
+    // Inkplate boards have no equivalent fast-wake story (no PMU
+    // power-cut), so the WakeSnapshot module no-ops by returning
+    // a null framebuffer here.
+    inline uint8_t * get_panel_framebuffer() { return nullptr; }
+    inline size_t    get_panel_framebuffer_size() { return 0; }
 
     #if INKPLATE_6PLUS
       void to_user_coord(uint16_t & x, uint16_t & y);
