@@ -441,12 +441,18 @@ OptionController::set_font_count(uint8_t count)
   font_params_form_entries[2].u.ch.choice_count = count;
 }
 
-void 
+void
 OptionController::enter()
 {
   menu_viewer.show(menu);
   main_form_is_shown = false;
   font_form_is_shown = false;
+}
+
+void
+OptionController::show_menu()
+{
+  menu_viewer.show(menu);
 }
 
 #if INKPLATE_6PLUS || MENU_6PLUS

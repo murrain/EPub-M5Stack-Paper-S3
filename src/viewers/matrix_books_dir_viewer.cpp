@@ -35,7 +35,17 @@ MatrixBooksDirViewer::setup()
   font = fonts.get(ScreenBottom::FONT);
   pagenbr_font_height = font->get_line_height(ScreenBottom::FONT_SIZE);
 
-  first_entry_ypos = (title_font_height << 1) + author_font_height + SPACE_BELOW_INFO + 10;
+  // On touch builds the menu strip occupies the top
+  // HEADER_RESERVED_HEIGHT pixels permanently, so books start
+  // below it. On button builds (no persistent strip) the
+  // original calculation runs — the title/author info block
+  // that the non-touch render path draws sits in this same
+  // top region.
+  #if (INKPLATE_6PLUS || TOUCH_TRIAL)
+    first_entry_ypos = HEADER_RESERVED_HEIGHT + 10;
+  #else
+    first_entry_ypos = (title_font_height << 1) + author_font_height + SPACE_BELOW_INFO + 10;
+  #endif
 
   line_count = (Screen::get_height() - first_entry_ypos - pagenbr_font_height - SPACE_ABOVE_PAGENBR + MIN_SPACE_BETWEEN_ENTRIES) / 
                 (BooksDir::max_cover_height + MIN_SPACE_BETWEEN_ENTRIES);
