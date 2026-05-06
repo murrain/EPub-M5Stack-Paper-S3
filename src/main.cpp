@@ -18,6 +18,7 @@
   #include "models/config.hpp"
   #include "models/nvs_mgr.hpp"
   #include "models/session_state.hpp"
+  #include "models/wake_snapshot.hpp"
   #include "screen.hpp"
   #include "inkplate_platform.hpp"
   #if defined(BOARD_TYPE_PAPER_S3)
@@ -167,6 +168,31 @@
                      /*preserve_panel_image=*/SessionState::is_warm_wake());
 
         ESP::show_internal_heap_info("after screen.setup");
+
+        // Warm-wake fast path: paint the cached snapshot (the book
+        // page the user was last viewing) onto the panel before the
+        // remaining boot work runs. The synchronous boot path that
+        // follows — fonts.setup, page_locs.setup, books_dir scan,
+        // app_controller.start - takes another 2-4 s; without this
+        // the user stares at a (clearing) wallpaper that whole time.
+        // With this they see their book essentially immediately, can
+        // read while the rest of boot completes, and only experience
+        // a brief input-dead window (current_ctrl is still NONE so
+        // taps/swipes harmlessly drop until app_controller.start
+        // assigns the BOOK controller).
+        //
+        // restore_to_panel arms screen.update internally which fires
+        // the s_force_full + s_warm_wake_clear_pending fullclear+GC16
+        // path, so the panel cleanly transitions wallpaper -> page.
+        if (SessionState::is_warm_wake()) {
+          if (wake_snapshot.restore_to_panel(nullptr, nullptr, nullptr)) {
+            LOG_I("warm-wake: snapshot painted, continuing boot");
+          }
+          else {
+            LOG_I("warm-wake: no snapshot available; falling back to "
+                  "normal boot rendering");
+          }
+        }
 
         event_mgr.setup();
         event_mgr.set_orientation(orientation);

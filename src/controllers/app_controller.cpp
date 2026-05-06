@@ -12,6 +12,7 @@
 #include "controllers/toc_controller.hpp"
 #include "controllers/event_mgr.hpp"
 #include "models/page_locs.hpp"
+#include "models/wake_snapshot.hpp"
 
 #if INKPLATE_6PLUS
   #include "controllers/back_lit.hpp"
@@ -142,6 +143,23 @@ AppController::going_to_deep_sleep()
   // corrupting either file. stop_document is safe to call when already
   // idle (the STOP handler short-circuits and sends STOPPED immediately).
   page_locs.stop_document();
+
+  // Persist the most recent rendered book page to SD before any
+  // controller writes its sleep-time UI (sleep-screen wallpaper,
+  // splash, etc.) over the framebuffer. The capture() into PSRAM
+  // happened earlier — every book_viewer.show_page records what's
+  // on screen — so this is just the SD-write half of the snapshot
+  // path. Skipped if no capture has occurred this session (e.g.
+  // user was in the books-dir and never opened a book).
+  //
+  // We persist BEFORE the controller leave() callbacks because some
+  // of them (book_controller -> save_last_book) write to NVS on the
+  // same SPI bus, and ordering the SD write first keeps any later
+  // NVS-side hiccup from leaving an orphaned snapshot pointing at
+  // a book id whose was_shown bit didn't get set.
+  if (wake_snapshot.has_pending_capture()) {
+    wake_snapshot.persist();
+  }
 
   switch (current_ctrl) {
     case Ctrl::DIR:     books_dir_controller.leave(true); break;

@@ -185,6 +185,16 @@ void Screen::panel_clear()
   epd_fullclear(&s_hl, s_temperature);
 }
 
+uint8_t * Screen::get_framebuffer_for_snapshot()
+{
+  return s_epd_initialized ? s_framebuffer : nullptr;
+}
+
+size_t Screen::get_framebuffer_size_for_snapshot()
+{
+  return s_epd_initialized ? (size_t)((EPD_WIDTH / 2) * EPD_HEIGHT) : 0;
+}
+
 void Screen::setup(PixelResolution resolution, Orientation orientation,
                    bool preserve_panel_image)
 {

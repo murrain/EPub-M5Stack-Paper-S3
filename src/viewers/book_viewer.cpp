@@ -4,6 +4,9 @@
 
 #define __BOOK_VIEWER__ 1
 #include "controllers/book_controller.hpp"
+#include "controllers/books_dir_controller.hpp"
+#include "models/books_dir.hpp"
+#include "models/wake_snapshot.hpp"
 #include "viewers/book_viewer.hpp"
 
 #include "models/config.hpp"
@@ -248,9 +251,9 @@ BookViewer::show_page(const PageLocs::PageId & page_id)
   std::scoped_lock guard(mutex);
 
   current_page_id = page_id;
-    
+
 //if (page_locs.get_page_nbr(page_id) == 0) {
-  if ((page_id.itemref_index == 0) && 
+  if ((page_id.itemref_index == 0) &&
       (page_id.offset        == 0)) {
 
     if (epub.get_book_format_params()->show_images != 0) {
@@ -279,5 +282,24 @@ BookViewer::show_page(const PageLocs::PageId & page_id)
   }
   else {
     build_page_at(page_id);
+  }
+
+  // Snapshot the just-rendered framebuffer for the wake-from-sleep
+  // fast path. capture() is a single PSRAM memcpy (~10 ms) and runs
+  // off the rendering pthread, so it doesn't lengthen the page-turn
+  // path. The on-disk persist happens later, only on deep-sleep
+  // entry — see app_controller.cpp::going_to_deep_sleep.
+  //
+  // book_id pulled here (rather than at persist time) because by the
+  // time deep-sleep entry runs, the framebuffer has already been
+  // overdrawn by SleepScreenViewer's wallpaper. We must capture
+  // while the book page is still on the framebuffer.
+  int16_t  bidx = books_dir_controller.get_current_book_index();
+  uint32_t book_id = 0;
+  if ((bidx >= 0) && books_dir.get_book_id((uint16_t)bidx, book_id)) {
+    uint32_t fh = WakeSnapshot::format_params_hash(
+                    epub.get_book_format_params(),
+                    sizeof(EPub::BookFormatParams));
+    wake_snapshot.capture(book_id, page_id, fh);
   }
 }
