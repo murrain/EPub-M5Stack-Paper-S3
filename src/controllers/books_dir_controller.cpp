@@ -21,6 +21,8 @@
 #include "viewers/matrix_books_dir_viewer.hpp"
 #include "screen.hpp"
 
+#include <cassert>
+
 #if EPUB_INKPLATE_BUILD
   #include "models/nvs_mgr.hpp"
   #include "esp.hpp"
@@ -300,6 +302,18 @@ BooksDirController::enter()
     // update_region for the strip area only — the just-painted
     // books area stays put on the panel.
     option_controller.show_menu();
+
+    // Geometry sanity check: the strip's actual rendered height
+    // (computed at show() time from font metrics) must fit
+    // inside the area the books viewer reserves. A font tweak
+    // or ICON_SIZE change could silently grow the strip past
+    // HEADER_RESERVED_HEIGHT, which would let it bleed into
+    // the book grid (the strip's update_region commits its own
+    // area, but the books viewer would have drawn books over
+    // the bottom of the strip on the previous full update).
+    // Assert is the right gate — drift here is a bug to fix at
+    // the constant, not at runtime.
+    assert(menu_viewer.get_region_height() <= BooksDirViewer::HEADER_RESERVED_HEIGHT);
   #endif
 }
 
@@ -330,7 +344,11 @@ BooksDirController::leave(bool going_to_deep_sleep)
     // render the books area + strip to restore the books-dir
     // screen.
     if (option_controller.has_active_sub_state()) {
-      option_controller.dispatch_to_sub_state(event);
+      // skip_strip_refresh=true: we re-render below after the
+      // sub-state ends; the in-dispatch menu_viewer.show calls
+      // would commit a partial EPD update that the outer render
+      // immediately overwrites. See MenuControllerBase header.
+      option_controller.dispatch_to_sub_state(event, /*skip_strip_refresh=*/true);
       if (!option_controller.has_active_sub_state()) {
         // Sub-state just ended. Restore the books-dir UI.
         books_dir_viewer->show_page_and_highlight(current_book_index);
