@@ -48,6 +48,15 @@ class OptionController : public MenuControllerBase
     void          leave(bool going_to_deep_sleep = false);
     void set_font_count(uint8_t count);
 
+    // Render the option menu strip. Used by BooksDirController
+    // to paint the persistent header on the books-dir screen
+    // (the menu is no longer a separate AppController state on
+    // touch builds — it lives as a permanent strip and the
+    // dispatch goes through BooksDirController::input_event).
+    // Internally calls menu_viewer.show(menu) where `menu` is
+    // the static option-menu array.
+    void show_menu();
+
     inline void        set_main_form_is_shown() { main_form_is_shown      = true; }
     inline void        set_font_form_is_shown() { font_form_is_shown      = true; }
 
@@ -85,7 +94,9 @@ class OptionController : public MenuControllerBase
 
   protected:
     bool has_active_sub_state() const override;
-    void dispatch_to_sub_state(const EventMgr::Event & event) override;
+    void dispatch_to_sub_state(
+      const EventMgr::Event & event,
+      bool                    skip_strip_refresh = false) override;
 };
 
 #if __OPTION_CONTROLLER__

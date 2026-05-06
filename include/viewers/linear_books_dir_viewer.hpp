@@ -18,7 +18,12 @@ class LinearBooksDirViewer : public BooksDirViewer
     static const int16_t AUTHOR_FONT           =  2;
     static const int16_t TITLE_FONT_SIZE       = 11;
     static const int16_t AUTHOR_FONT_SIZE      =  9;
-    static const int16_t FIRST_ENTRY_YPOS      =  5;
+    // Book list starts below the menu strip on touch builds.
+    // HEADER_RESERVED_HEIGHT is 80 on touch (matches Gestures::
+    // TOP_EDGE_PX), 0 on button builds (no persistent strip).
+    // The +5 keeps a small gap below the strip; previous value
+    // was 5 (no strip).
+    static const int16_t FIRST_ENTRY_YPOS      =  HEADER_RESERVED_HEIGHT + 5;
     static const int16_t SPACE_BETWEEN_ENTRIES =  6;
     static const int16_t MAX_TITLE_SIZE        = 85;
 
