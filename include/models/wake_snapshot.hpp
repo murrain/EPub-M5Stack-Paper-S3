@@ -85,12 +85,27 @@ class WakeSnapshot
     struct PageEntryMeta
     {
       int16_t  itemref_index;
-      int16_t  reserved0;      ///< 4-byte align next field
+      int16_t  pad0;           ///< 4-byte align next field; distinct
+                               ///< name from Header::reserved0 so
+                               ///< both are unambiguously
+                               ///< addressable in one TU.
       int32_t  page_offset;
       uint32_t fb_crc;         ///< CRC-32 of this entry's framebuffer.
     };
     static constexpr uint32_t MAGIC   = 0xFEEDFACEu;
     static constexpr uint32_t VERSION = 2u;
+
+    // Lock the on-disk struct sizes at compile time. The v2 file
+    // format is now a contract with persisted state on user
+    // devices; a future field reorder that silently re-introduces
+    // padding would break that contract without breaking the
+    // build. We deliberately do NOT use __attribute__((packed)):
+    // it would force unaligned access on the 32-bit fields and
+    // doesn't solve a problem we have (the current layout already
+    // packs cleanly — see the explicit reserved0[3] / reserved1
+    // fields whose entire job is to make this true).
+    static_assert(sizeof(Header) == 32, "WakeSnapshot::Header on-disk size invariant");
+    static_assert(sizeof(PageEntryMeta) == 12, "WakeSnapshot::PageEntryMeta on-disk size invariant");
 
     WakeSnapshot();
     ~WakeSnapshot();

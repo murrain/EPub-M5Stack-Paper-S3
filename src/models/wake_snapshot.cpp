@@ -13,6 +13,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <cerrno>
+#include <sys/types.h>
 
 #if EPUB_INKPLATE_BUILD
   #include "esp_heap_caps.h"
@@ -99,7 +100,10 @@ WakeSnapshot::capture(uint32_t book_id,
   cached_header_.fb_height    = (int16_t) Screen::get_height();
   cached_header_.fb_bpp       = 4;
   cached_header_.fb_size      = (uint32_t) sz;
-  cached_header_.page_count   = 1;  // overwritten in persist()
+  // page_count is set by persist() once the live PageCache entry
+  // count is known. Leaving it 0 here means an accidental persist
+  // without the proper enumerate-and-set step would produce a
+  // self-rejecting file (page_count==0 fails the restore check).
 
   cached_primary_meta_               = {};
   cached_primary_meta_.itemref_index = page_id.itemref_index;
@@ -120,18 +124,24 @@ WakeSnapshot::persist()
     return false;
   }
 
-  // Phase C: collect PageCache complete entries to persist alongside
-  // the primary captured page. PageCache::enumerate_complete returns
-  // the bitmaps under released cache_mutex_ — see the lifetime
-  // contract in the header. Today's safe-by-construction reasoning:
-  // persist runs on mainTask in going_to_deep_sleep AFTER page_cache
-  // .stop has NOT yet been called (we want to capture pre-paint
-  // state), but pre-paint can't race because mainTask is still
-  // holding the event loop and pre-paint serializes via book_viewer
-  // .get_mutex which mainTask doesn't hold here. Code-quality
-  // review flagged this as fragile — Phase D / next iteration
-  // should redesign the API to hold cache_mutex_ across the whole
-  // serialize loop.
+  // Phase C: collect PageCache complete entries to persist
+  // alongside the primary captured page. enumerate_complete
+  // returns framebuffer pointers under a released cache_mutex_,
+  // so the lifetime invariant the caller must honor is
+  // "no other thread mutates the cache between enumerate and
+  // the fwrite of the last entry's body."
+  //
+  // That invariant holds here because going_to_deep_sleep runs
+  // on mainTask, mainTask is the only thread that mutates the
+  // cache (all the lifecycle hooks — stop, invalidate_all,
+  // start — fire from controller code on this same task), and
+  // the pre-paint thread only writes to its own currently-
+  // assigned slot (under book_viewer.get_mutex which mainTask
+  // doesn't hold during persist, but pre-paint never touches
+  // ANOTHER slot than the one it's pre-painting). The cache
+  // ordering in app_controller.cpp::going_to_deep_sleep —
+  // persist BEFORE page_cache.stop — is what makes this
+  // capture meaningful at all.
   PageCache::CompleteEntry extra[PageCache::SLOT_COUNT];
   size_t extra_count = page_cache.enumerate_complete(extra, PageCache::SLOT_COUNT);
 
@@ -399,6 +409,20 @@ WakeSnapshot::hydrate_page_cache(uint32_t expected_book_id,
     fclose(f);
     return 0;
   }
+  // Clamp against the maximum we could possibly hydrate. Without
+  // this, a corrupted file claiming page_count=65535 would cause
+  // a 768 KB malloc, a multi-MB seek loop, and 64-bit overflow
+  // in the offset arithmetic on 32-bit ESP-IDF (long is 32 bits
+  // here). Cap at SLOT_COUNT + 1 (primary + all cache slots) —
+  // anything above that can't possibly have been written by a
+  // correct persist().
+  const uint16_t max_pages = (uint16_t)(PageCache::SLOT_COUNT + 1);
+  if (hdr.page_count > max_pages) {
+    LOG_W("hydrate: page_count %u exceeds cap %u; corrupt file?",
+          (unsigned) hdr.page_count, (unsigned) max_pages);
+    fclose(f);
+    return 0;
+  }
 
   size_t injected = 0;
   size_t fb_size  = (size_t) hdr.fb_size;
@@ -417,21 +441,12 @@ WakeSnapshot::hydrate_page_cache(uint32_t expected_book_id,
     return 0;
   }
 
-  // Read all PageEntryMeta entries up-front (small, ~12 bytes each)
-  // so we can iterate them while seeking around the framebuffer
-  // body. We've already read the Header (sizeof(Header) bytes
-  // consumed); read remaining count of meta entries.
-  PageEntryMeta * metas = (PageEntryMeta *) malloc(
-    sizeof(PageEntryMeta) * hdr.page_count);
-  if (metas == nullptr) {
-    LOG_W("hydrate: alloc for meta array failed");
-    free(scratch);
-    fclose(f);
-    return 0;
-  }
+  // Read all PageEntryMeta entries up-front. Stack-allocated since
+  // page_count is now bounded to SLOT_COUNT + 1 (8) — that's only
+  // 96 bytes, no need for malloc + failure path.
+  PageEntryMeta metas[PageCache::SLOT_COUNT + 1];
   if (fread(metas, sizeof(PageEntryMeta), hdr.page_count, f) != hdr.page_count) {
     LOG_W("hydrate: meta array read failed");
-    free(metas);
     free(scratch);
     fclose(f);
     return 0;
@@ -440,11 +455,12 @@ WakeSnapshot::hydrate_page_cache(uint32_t expected_book_id,
   // Iterate entries 1..page_count-1 (skip primary, already on
   // panel via restore_to_panel). For each: seek to its framebuffer
   // offset, read into scratch, CRC, inject.
-  long fb_array_offset = (long) sizeof(Header)
-                       + (long) hdr.page_count * (long) sizeof(PageEntryMeta);
+  // off_t is 64-bit on most platforms; safe for multi-MB offsets.
+  off_t fb_array_offset = (off_t) sizeof(Header)
+                        + (off_t) hdr.page_count * (off_t) sizeof(PageEntryMeta);
   for (uint16_t i = 1; i < hdr.page_count; ++i) {
-    long entry_offset = fb_array_offset + (long) i * (long) fb_size;
-    if (fseek(f, entry_offset, SEEK_SET) != 0) {
+    off_t entry_offset = fb_array_offset + (off_t) i * (off_t) fb_size;
+    if (fseek(f, (long) entry_offset, SEEK_SET) != 0) {
       LOG_W("hydrate: fseek to entry %u failed", (unsigned) i);
       break;
     }
@@ -467,7 +483,6 @@ WakeSnapshot::hydrate_page_cache(uint32_t expected_book_id,
     }
   }
 
-  free(metas);
   free(scratch);
   fclose(f);
 
