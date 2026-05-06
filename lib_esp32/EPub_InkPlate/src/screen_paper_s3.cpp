@@ -245,6 +245,93 @@ void Screen::panel_clear()
   epd_fullclear(&s_hl, s_temperature);
 }
 
+// Map a logical (post-rotation) rectangle to physical panel
+// coordinates. The display is set to EPD_ROT_INVERTED_PORTRAIT
+// (see setup at line ~191), so the caller-visible 540x960 logical
+// space rotates 90° (and inverts) into the panel's native 960x540.
+// Specifically:
+//   physical_x = logical_y
+//   physical_y = (EPD_HEIGHT - 1) - logical_x
+// Bounding box for a logical rect:
+//   px range = [ly, ly+lh-1]              → length lh
+//   py range = [EPD_HEIGHT-(lx+lw), EPD_HEIGHT-1-lx] → length lw
+static EpdRect logical_rect_to_physical(uint16_t lx, uint16_t ly,
+                                        uint16_t lw, uint16_t lh)
+{
+  EpdRect r;
+  r.x      = (int) ly;
+  r.y      = (int) (EPD_HEIGHT - (lx + lw));
+  r.width  = (int) lh;
+  r.height = (int) lw;
+  return r;
+}
+
+void Screen::update_region(Pos pos, Dim dim, UpdateMode mode)
+{
+  if (!s_epd_initialized) return;
+
+  // Force-full and warm-wake-clear are TRANSACTIONAL with the panel
+  // image: they expect the next update to drive the full waveform
+  // sequence (epd_fullclear + GC16) over the whole panel before the
+  // application's next region paints can be trusted. A partial
+  // update_region in that state would leave half the panel in the
+  // wrong waveform tracking. Forward to update() which honors the
+  // flags correctly.
+  if (s_force_full || s_warm_wake_clear_pending) {
+    update(mode);
+    return;
+  }
+
+  EpdRect area = logical_rect_to_physical(pos.x, pos.y, dim.width, dim.height);
+
+  EpdDrawMode epd_mode;
+  const char * label;
+  switch (mode) {
+    case UpdateMode::FULL:
+      epd_mode = MODE_GC16;       label = "GC16(region-full)";
+      s_partial_count = PARTIAL_COUNT_ALLOWED;
+      break;
+    case UpdateMode::FORCE_PARTIAL:
+      epd_mode = MODE_GL16;       label = "GL16(region-partial)";
+      s_partial_count = 0;
+      break;
+    case UpdateMode::FAST:
+#ifdef EPD_FAST_PAGE_TURNS_FALLBACK
+      epd_mode = MODE_GL16;       label = "GL16(region-fast-fallback)";
+#else
+      epd_mode = MODE_DU;         label = "DU(region-fast)";
+#endif
+      if (s_partial_count - FAST_BUDGET_COST < 0) {
+        epd_mode = MODE_GC16;     label = "GC16(region-fast-cleanup)";
+        s_partial_count = PARTIAL_COUNT_ALLOWED;
+      } else {
+        s_partial_count -= FAST_BUDGET_COST;
+      }
+      break;
+    case UpdateMode::BUDGETED:
+    default:
+      if (s_partial_count <= 0) {
+        epd_mode = MODE_GC16;     label = "GC16(region-budgeted)";
+        s_partial_count = PARTIAL_COUNT_ALLOWED;
+      } else {
+        epd_mode = MODE_GL16;     label = "GL16(region-budgeted)";
+        s_partial_count--;
+      }
+      break;
+  }
+  (void) label;
+
+#ifdef EPD_LOG_UPDATE_TIMING
+  int64_t t0 = esp_timer_get_time();
+#endif
+  epd_hl_update_area(&s_hl, epd_mode, s_temperature, area);
+#ifdef EPD_LOG_UPDATE_TIMING
+  int64_t dt_us = esp_timer_get_time() - t0;
+  ESP_LOGI("screen", "update_region %s [%d,%d %dx%d]: %lld us",
+           label, area.x, area.y, area.width, area.height, (long long) dt_us);
+#endif
+}
+
 uint8_t * Screen::get_panel_framebuffer()
 {
   return s_epd_initialized ? s_framebuffer : nullptr;

@@ -87,6 +87,13 @@ class Screen : NonCopyable
     // for cross-platform consumers, not an error.
     inline uint8_t * get_panel_framebuffer() { return nullptr; }
     inline size_t    get_panel_framebuffer_size() { return 0; }
+
+    // Linux GTK build doesn't have a partial-update path; stub
+    // forwards to nothing visible. The cross-platform consumer
+    // (menu_viewer) calls this expecting commit semantics; on
+    // Linux the existing full-screen redraw on the next frame
+    // covers it.
+    inline void update_region(Pos /*pos*/, Dim /*dim*/, UpdateMode /*mode*/) {}
     class ScopedRenderTarget
     {
       public:

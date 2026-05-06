@@ -157,14 +157,38 @@ void MenuViewer::show(MenuEntry * the_menu, uint8_t entry_index, bool clear_scre
     Dim(Screen::get_width() - 20, 3),
     Pos(10, region_height - 12));
 
-  ScreenBottom::show();
+  // ScreenBottom::show() removed for partial-paint operation: it
+  // draws the page-number indicator at the BOTTOM of the screen.
+  // The book page underneath the menu already has a correct
+  // indicator from the last show_and_capture commit; redrawing
+  // it here would force update_region to either span the whole
+  // panel height (defeating the partial-paint win) or leave the
+  // bottom framebuffer/panel-state pair desynced. Cleaner to skip
+  // the menu-time bottom redraw — book mode's next paint restores
+  // it correctly when the menu is dismissed.
 
   // First show after entering the menu — leave to BUDGETED so a
   // pending force_full_update from the controller transition can
-  // emit a clean GC16 and flush book-page ghosting. Subsequent
-  // in-menu interactions (highlight, tap-and-hold hint) below use
-  // FAST explicitly.
-  page.paint(clear_screen);
+  // emit a clean GC16 within the region and flush local ghosting.
+  // Subsequent in-menu interactions (highlight, tap-and-hold
+  // hint) call commit_region with FAST.
+  commit_region(Screen::UpdateMode::BUDGETED, clear_screen, /*do_it=*/true);
+}
+
+void
+MenuViewer::commit_region(Screen::UpdateMode mode,
+                          bool clear_screen,
+                          bool do_it)
+{
+  // Render display list to the panel framebuffer (no ScopedRender
+  // Target should be active here — BookController::leave paused
+  // pre-paint before any non-BOOK controller takes over). Then
+  // commit only the menu's top strip. Book content below stays on
+  // display untouched.
+  page.paint_to_active_target(clear_screen, do_it);
+  screen.update_region(Pos(0, 0),
+                       Dim(Screen::get_width(), region_height),
+                       mode);
 }
 
 #if (INKPLATE_6PLUS || TOUCH_TRIAL)
@@ -232,7 +256,7 @@ MenuViewer::clear_highlight()
     }
 
     // Highlight clear is a transient UI tweak — DU is fine.
-    page.paint(Screen::UpdateMode::FAST, false);
+    commit_region(Screen::UpdateMode::FAST);
   #endif
 }
 
@@ -283,7 +307,7 @@ MenuViewer::event(const EventMgr::Event & event)
           // Tap-and-hold hint is a transient overlay; DU keeps the
           // user in feedback within ~120 ms instead of waiting for
           // a 450 ms GL16.
-          page.paint(Screen::UpdateMode::FAST, false);
+          commit_region(Screen::UpdateMode::FAST);
         }
         break;
 
@@ -317,7 +341,7 @@ MenuViewer::event(const EventMgr::Event & event)
 
               // Tap acknowledgement before invoking the action —
               // user wants to see the highlight as fast as possible.
-              page.paint(Screen::UpdateMode::FAST, false);
+              commit_region(Screen::UpdateMode::FAST);
             }
             else {
               hint_shown = false;
@@ -392,7 +416,7 @@ MenuViewer::event(const EventMgr::Event & event)
     ScreenBottom::show();
 
     // Inkplate keypad-driven menu navigation: same FAST treatment.
-    page.paint(Screen::UpdateMode::FAST, false);
+    commit_region(Screen::UpdateMode::FAST);
   #endif
 
   return false;
