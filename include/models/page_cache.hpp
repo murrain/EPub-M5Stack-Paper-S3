@@ -112,6 +112,24 @@ class PageCache
     // edit, orientation change, and as part of book switch. Cheap.
     void invalidate_all();
 
+    // Quiesce the pre-paint pthread without freeing the slab.
+    // Called on every transition out of BOOK (BookController::
+    // leave) so foreground code paths that paint via screen.draw_*
+    // — menu_viewer, msg_viewer, battery_viewer, sleep_screen,
+    // wallpaper, usb_msc_viewer — never race the pthread's
+    // ScopedRenderTarget guard. Without this pause, those paths'
+    // screen.update() calls trip Phase A's "active==panel"
+    // assertion when pre-paint is mid-render and abort() the
+    // device. resume() restores normal pre-paint operation when
+    // BookController::enter runs again.
+    //
+    // Same shape as stop() — STOP-sentinel + ACK handshake — but
+    // does NOT free the slab or join the pthread, so re-entry to
+    // BOOK doesn't pay the alloc + thread-spawn cost on every
+    // PARAM/TOC trip.
+    void pause();
+    void resume();
+
     // Request that the cache hold exactly the given set of pages.
     // Entries outside the set are evicted (slots become available);
     // entries inside the set that aren't already cached are queued

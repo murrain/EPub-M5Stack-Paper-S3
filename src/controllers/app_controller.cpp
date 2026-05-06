@@ -137,6 +137,15 @@ AppController::going_to_deep_sleep()
     touch_screen.shutdown();
   #endif
 
+  // Pause pre-paint BEFORE the persist so enumerate_complete
+  // returns stable framebuffer pointers. Without this pause, the
+  // pthread could be mid-render of one of the cache slots while
+  // persist's fwrite reads it — torn-page-on-disk, fails CRC on
+  // next wake's hydrate. Pause is cheap (handshake-bounded, no
+  // alloc) and reversed implicitly by the upcoming page_cache.
+  // stop() which sees the already-paused state.
+  page_cache.pause();
+
   // Persist the wake snapshot FIRST, while page_cache is still
   // alive. The Phase C multi-page format relies on
   // PageCache::enumerate_complete returning live entries during

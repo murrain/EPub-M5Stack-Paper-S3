@@ -128,6 +128,11 @@ BookController::enter()
 {
   LOG_D("===> Enter()...");
 
+  // Resume pre-paint pthread (was paused on the way out via leave).
+  // Idempotent if cache wasn't paused (e.g. on first entry into
+  // BOOK after open_book_file's start()), so always safe to call.
+  page_cache.resume();
+
   #if DEBUGGING && EPUB_INKPLATE_BUILD
     // Heap watermark on every book enter. Lets a maintainer verify
     // the sequential-load leak fix on a regression-test repro: open
@@ -155,6 +160,22 @@ void
 BookController::leave(bool going_to_deep_sleep)
 {
   LOG_D("===> leave()...");
+
+  // Pause pre-paint pthread on EVERY leave path. Foreground
+  // viewers that paint outside book_viewer's mutex (menu_viewer,
+  // msg_viewer, battery_viewer, sleep_screen, wallpaper, usb_msc)
+  // call screen.update() which asserts that the active framebuffer
+  // is the panel — exactly the assertion pre-paint's
+  // ScopedRenderTarget violates while it's mid-render. Without
+  // this pause, opening the menu while pre-paint is rendering
+  // page N+1 abort()s the device. Pause is cheap (~milliseconds
+  // of round-trip + at most one in-flight render's worth of time
+  // for the inner abort check to fire); resume() reverses it
+  // when control comes back to BOOK.
+  //
+  // Pause happens BEFORE save_last_book / future close_file because
+  // we want pre-paint quiesced before any state mutation begins.
+  page_cache.pause();
 
   // Teardown of the active book (page_locs.stop_document +
   // epub.close_file) is NOT done here. AppController::launch calls

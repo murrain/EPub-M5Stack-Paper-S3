@@ -60,7 +60,14 @@ PageCache PageCache::singleton;
 
 namespace
 {
-  static constexpr int16_t STOP_SENTINEL_ITEMREF = -1;
+  // STOP terminates the pthread; used by stop().
+  // NUDGE just wakes the pthread, ACKs, and continues looping;
+  //   used by pause() to confirm in-flight renders have exited
+  //   their ScopedRenderTarget and released book_viewer.get_mutex.
+  // Two sentinels because the pthread needs to distinguish
+  // "should I exit?" from "should I just ACK and idle?"
+  static constexpr int16_t STOP_SENTINEL_ITEMREF  = -1;
+  static constexpr int16_t NUDGE_SENTINEL_ITEMREF = -2;
 
   static QueueHandle_t prepaint_queue = nullptr;
   static QueueHandle_t stop_ack_queue = nullptr;
@@ -180,10 +187,20 @@ PageCache::start()
         continue;
       }
       if (job.page_id.itemref_index == STOP_SENTINEL_ITEMREF) {
-        // STOP sentinel — ack and exit.
+        // STOP sentinel — ack and exit pthread.
         uint8_t ack = 1;
         xQueueSend(stop_ack_queue, &ack, 0);
         return;
+      }
+      if (job.page_id.itemref_index == NUDGE_SENTINEL_ITEMREF) {
+        // NUDGE sentinel from pause() — ack and keep looping.
+        // We're guaranteed to be OUTSIDE any ScopedRenderTarget
+        // when we receive this (we're in QUEUE_RECEIVE), so the
+        // pause-caller can safely paint via foreground draw paths
+        // after the ACK arrives.
+        uint8_t ack = 1;
+        xQueueSend(stop_ack_queue, &ack, 0);
+        continue;
       }
       if (cache_aborting) continue;
 
@@ -291,6 +308,83 @@ PageCache::stop()
   }
 
   LOG_I("PageCache::stop: pre-paint task joined, slab freed");
+#endif
+}
+
+void
+PageCache::pause()
+{
+#if EPUB_INKPLATE_BUILD && defined(BOARD_TYPE_PAPER_S3)
+  bool need_drain;
+  {
+    std::scoped_lock guard(cache_mutex_);
+    if (!active_) return;
+    if (cache_aborting) return;  // already paused
+    cache_aborting = true;
+    need_drain = true;
+  }
+  if (!need_drain) return;
+
+  // The pthread is either:
+  //   (a) blocked in QUEUE_RECEIVE waiting for a job — fine, our
+  //       aborting flag will be checked on the next dequeue, but
+  //       there's nothing in flight to wait for. Skip the ACK to
+  //       avoid blocking forever.
+  //   (b) mid-render holding book_viewer.get_mutex() and the
+  //       ScopedRenderTarget — needs to finish or honor the
+  //       inner-loop abort check (PageCachePrePaintInterp::
+  //       should_abort_inner returns the cache_aborting flag).
+  //
+  // Probe with a try-acquire on book_viewer's mutex: if we get it
+  // immediately, the pthread isn't rendering and we're done. If
+  // not, send a NUDGE sentinel and wait for it to come back via
+  // the ACK queue.
+  if (book_viewer.get_mutex().try_lock()) {
+    book_viewer.get_mutex().unlock();
+    return;  // case (a): pthread idle, nothing to drain
+  }
+
+  // case (b): pthread is rendering. Send a NUDGE sentinel that
+  // the lambda recognizes as "ACK and keep looping" — distinct
+  // from STOP which exits the pthread. Pre-paint's render also
+  // has should_abort_inner() now wired to cache_aborting (set
+  // above), so build_pages_recurse exits early; the pthread
+  // unwinds, releases the BV mutex + ScopedRenderTarget, gets
+  // back to QUEUE_RECEIVE, dequeues the NUDGE, and ACKs.
+  // Bounded timeout so a misbehaving render can't deadlock the
+  // user's menu open.
+  PrePaintJob nudge_job;
+  nudge_job.page_id     = PageLocs::PageId(NUDGE_SENTINEL_ITEMREF, 0);
+  nudge_job.format_hash = 0;
+  // Don't take portMAX_DELAY here — if the queue is full we'd
+  // wait for pre-paint to dequeue a real job first, but pre-paint
+  // is exactly what we're trying to interrupt. 100 ms is plenty.
+  if (xQueueSend(prepaint_queue, &nudge_job, pdMS_TO_TICKS(100)) != pdTRUE) {
+    LOG_W("pause: nudge enqueue timed out; pre-paint may finish "
+          "current job uninterrupted");
+    return;
+  }
+
+  uint8_t ack = 0;
+  // 2 second cap — should_abort_inner fires every 64 chars so
+  // even worst-case page ends within ~50 ms; 2 s is paranoia.
+  if (xQueueReceive(stop_ack_queue, &ack, pdMS_TO_TICKS(2000)) != pdTRUE) {
+    LOG_W("pause: ACK timed out; pthread may still be rendering");
+  }
+  // After this returns, the pthread is back at the top of its
+  // loop and will see cache_aborting=true on the next iteration,
+  // so subsequent jobs will be dropped until resume() clears the
+  // flag. The slab and entry table are intact.
+#endif
+}
+
+void
+PageCache::resume()
+{
+#if EPUB_INKPLATE_BUILD && defined(BOARD_TYPE_PAPER_S3)
+  std::scoped_lock guard(cache_mutex_);
+  if (!active_) return;
+  cache_aborting = false;
 #endif
 }
 
@@ -504,6 +598,23 @@ class PageCachePrePaintInterp : public HTMLInterpreter
   public:
     PageCachePrePaintInterp(Page & p, DOM & d, const EPub::ItemInfo & info)
       : HTMLInterpreter(p, d, Page::ComputeMode::DISPLAY, info) {}
+
+    // Honor pause() / stop() requests mid-render. cache_aborting is
+    // set by either pathway; when build_pages_recurse polls this
+    // every 64 chars (see html_interpreter.cpp), returning true
+    // unwinds the recursion. The pthread then releases book_viewer.
+    // get_mutex and the ScopedRenderTarget, gets back to its
+    // QUEUE_RECEIVE, and the pause/stop's NUDGE/STOP sentinel
+    // arrives with a clean rendering state.
+    //
+    // Without this, a long page render could hold the panel-active
+    // framebuffer pointer at the scratch buffer for hundreds of ms
+    // while menu_viewer tries to paint — tripping Phase A's
+    // assert(s_active_framebuffer == s_framebuffer) in
+    // screen.update() and abort()ing the device. That was the
+    // crash report from the first hardware run on the integrated
+    // Stage 2 branch.
+    bool should_abort_inner() const override { return cache_aborting; }
 
   protected:
     bool page_end(const Page::Format &) override { return true; }
