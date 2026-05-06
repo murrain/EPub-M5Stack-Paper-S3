@@ -6,15 +6,15 @@
 #include "global.hpp"
 
 #include "controllers/event_mgr.hpp"
+#include "controllers/menu_controller_base.hpp"
 
-class OptionController
+class OptionController : public MenuControllerBase
 {
   private:
     static constexpr char const * TAG = "OptionController";
 
     bool main_form_is_shown;
     bool font_form_is_shown;
-    bool books_refresh_needed;
 
     #if DATE_TIME_RTC
       bool date_time_form_is_shown;
@@ -35,7 +35,6 @@ class OptionController
   public:
     OptionController() : main_form_is_shown(false),
                          font_form_is_shown(false),
-                         books_refresh_needed(false),
                          #if DATE_TIME_RTC
                            date_time_form_is_shown(false),
                          #endif
@@ -44,12 +43,11 @@ class OptionController
                          #endif
                          wait_for_key_after_wifi(false),
                          wait_for_key_after_usb(false) { };
-                         
-    void    input_event(const EventMgr::Event & event);
+
     void          enter();
     void          leave(bool going_to_deep_sleep = false);
     void set_font_count(uint8_t count);
-     
+
     inline void        set_main_form_is_shown() { main_form_is_shown      = true; }
     inline void        set_font_form_is_shown() { font_form_is_shown      = true; }
 
@@ -84,6 +82,10 @@ class OptionController
         calibration_is_shown    = false;
       #endif
     }
+
+  protected:
+    bool has_active_sub_state() const override;
+    void dispatch_to_sub_state(const EventMgr::Event & event) override;
 };
 
 #if __OPTION_CONTROLLER__

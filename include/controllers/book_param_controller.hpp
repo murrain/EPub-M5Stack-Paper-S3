@@ -6,8 +6,9 @@
 #include "global.hpp"
 
 #include "controllers/event_mgr.hpp"
+#include "controllers/menu_controller_base.hpp"
 
-class BookParamController
+class BookParamController : public MenuControllerBase
 {
   private:
     static constexpr char const * TAG = "BookParamController";
@@ -24,7 +25,6 @@ class BookParamController
         wait_for_key_after_wifi(false),
             delete_current_book(false) { };
 
-    void    input_event(const EventMgr::Event & event);
     void          enter();
     void          leave(bool going_to_deep_sleep = false);
     void set_font_count(uint8_t count);
@@ -33,6 +33,10 @@ class BookParamController
     inline void         set_page_nav_is_shown() { page_nav_is_shown         = true; }
     inline void    set_wait_for_key_after_wifi() { wait_for_key_after_wifi  = true; }
     inline void        set_delete_current_book() { delete_current_book      = true; }
+
+  protected:
+    bool has_active_sub_state() const override;
+    void dispatch_to_sub_state(const EventMgr::Event & event) override;
 };
 
 #if __BOOK_PARAM_CONTROLLER__

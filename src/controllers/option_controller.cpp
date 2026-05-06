@@ -468,8 +468,30 @@ OptionController::leave(bool going_to_deep_sleep)
 {
 }
 
-void 
-OptionController::input_event(const EventMgr::Event & event)
+bool
+OptionController::has_active_sub_state() const
+{
+  // Each flag corresponds to a sub-form / sub-state with its own
+  // cancel/OK or key-press handshake. New flags belong here AND
+  // in dispatch_to_sub_state below — keep the two methods in sync.
+  // The two wait-for-key flags are declared unconditionally so
+  // they're safe to read here; date_time_form_is_shown and
+  // calibration_is_shown are conditionally declared (matching
+  // the sub-form availability) and need the same guards.
+  return main_form_is_shown
+      || font_form_is_shown
+      #if DATE_TIME_RTC
+        || date_time_form_is_shown
+      #endif
+      #if INKPLATE_6PLUS
+        || calibration_is_shown
+      #endif
+      || wait_for_key_after_wifi
+      || wait_for_key_after_usb;
+}
+
+void
+OptionController::dispatch_to_sub_state(const EventMgr::Event & event)
 {
   if (main_form_is_shown) {
     if (form_viewer.event(event)) {
@@ -502,7 +524,7 @@ OptionController::input_event(const EventMgr::Event & event)
         if (old_dir_view != dir_view) {
           books_dir_controller.set_current_book_index(-1);
         }
-        
+
         #if !defined(BOARD_TYPE_PAPER_S3)
           if (old_resolution != resolution) {
             fonts.clear_glyph_caches();
@@ -517,7 +539,7 @@ OptionController::input_event(const EventMgr::Event & event)
         }
 
         #if !defined(BOARD_TYPE_PAPER_S3)
-          if ((old_orientation != orientation) || 
+          if ((old_orientation != orientation) ||
               (old_resolution  != resolution )) {
         #else
           if (old_orientation != orientation) {
@@ -581,11 +603,6 @@ OptionController::input_event(const EventMgr::Event & event)
                       "The device is now restarting. Please wait.");
       wait_for_key_after_wifi = false;
       stop_web_server();
-      if (books_refresh_needed) {
-        books_refresh_needed = false;
-        int16_t dummy;
-        books_dir.refresh(nullptr, dummy, true);
-      }
       esp_restart();
     }
   #endif
@@ -607,22 +624,11 @@ OptionController::input_event(const EventMgr::Event & event)
   #endif
 
   #if INKPLATE_6PLUS
-  else if (calibration_is_shown) {
-    if (event_mgr.calibration_event(event)) {
-      calibration_is_shown = false;
-      menu_viewer.show(menu, 0, true);
-    }
-  }
-  #endif
-  
-  else {
-    if (menu_viewer.event(event)) {
-      if (books_refresh_needed) {
-        books_refresh_needed = false;
-        int16_t dummy;
-        books_dir.refresh(nullptr, dummy, true);
+    else if (calibration_is_shown) {
+      if (event_mgr.calibration_event(event)) {
+        calibration_is_shown = false;
+        menu_viewer.show(menu, 0, true);
       }
-      app_controller.set_controller(AppController::Ctrl::LAST);
     }
-  }
+  #endif
 }
