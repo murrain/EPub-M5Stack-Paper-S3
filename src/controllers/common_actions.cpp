@@ -27,6 +27,12 @@
   #include <thread>
 #endif
 
+// Required by the LOG_W call in refresh_books_dir — the
+// LOG_* macros expand to log('W', TAG, ...) and need a file-
+// scope TAG to compile. Was missing in the async-refresh
+// commit; user reflashed and hit the build break on paper_s3.
+static constexpr char const * TAG = "CommonActions";
+
 #if EPUB_INKPLATE_BUILD
   #include "inkplate_platform.hpp"
   #include "esp.hpp"
