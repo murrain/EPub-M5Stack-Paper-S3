@@ -82,7 +82,9 @@ class Screen : NonCopyable
     // snapshot consumers) compiles without #ifdef walls. Linux dev
     // builds don't have the off-screen pre-paint feature; the cache
     // module no-ops on a null framebuffer the same way it does on
-    // Inkplate boards.
+    // Inkplate boards. Stub does nothing intentionally even with a
+    // null `buf` — constructing it that way is the supported pattern
+    // for cross-platform consumers, not an error.
     inline uint8_t * get_panel_framebuffer() { return nullptr; }
     inline size_t    get_panel_framebuffer_size() { return 0; }
     class ScopedRenderTarget

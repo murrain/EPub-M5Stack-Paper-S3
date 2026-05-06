@@ -111,8 +111,10 @@ class Screen : NonCopyable
     //   1. `buf` must point to writable memory of at least
     //      `expected_size` bytes equal to get_panel_framebuffer_size()
     //      (typically ~256 KB for the 960×540×4bpp panel). Mismatch
-    //      is asserted in debug builds; release builds will simply
-    //      paint into whatever's there.
+    //      is asserted in debug builds. Release builds may crash on
+    //      a null `buf` (the draw primitives' row-base computation
+    //      dereferences it) or render garbage past the end of a
+    //      smaller-than-expected buffer.
     //   2. The CALLER serializes guard construction. Concurrent
     //      guards from different threads is undefined behavior —
     //      the indirection through s_active_framebuffer is not
@@ -281,7 +283,12 @@ class Screen : NonCopyable
     // makes off-screen retargeting cheap, and the page-cache feature
     // is PaperS3-only by virtue of relying on the wake-snapshot
     // single-page path that already returns nullptr above. Both
-    // constructor and destructor are empty here.
+    // constructor and destructor are empty — and intentionally so
+    // even with a null `buf`. The cross-platform contract is that
+    // PaperS3-only consumers detect "no panel framebuffer" via
+    // get_panel_framebuffer() and skip the off-screen render path
+    // entirely on Inkplate; constructing a stub guard with nullptr
+    // is a valid pattern, not an error.
     class ScopedRenderTarget
     {
       public:
