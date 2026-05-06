@@ -157,9 +157,15 @@
         // the user stares at a (clearing) wallpaper that whole time.
         // With this they see their book essentially immediately, can
         // read while the rest of boot completes, and only experience
-        // a brief input-dead window (current_ctrl is still NONE so
-        // taps/swipes harmlessly drop until app_controller.start
-        // assigns the BOOK controller).
+        // a brief input-dead window. event_mgr.setup() (below)
+        // initializes the touch driver, which starts pushing TAP/
+        // SWIPE events into input_event_queue immediately — but
+        // AppController isn't ready to dispatch them yet, so they
+        // pile up. AppController::start coalesces the queued batch
+        // down to the single most-recent event before entering the
+        // regular event loop, so a user who swiped 3× during boot
+        // (each retry thinking the prior didn't register) gets the
+        // ONE page turn they actually wanted, not three.
         //
         // restore_to_panel arms screen.update internally which fires
         // the s_force_full + s_warm_wake_clear_pending fullclear+GC16

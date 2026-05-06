@@ -40,8 +40,42 @@ AppController::start()
     launch();
     event_mgr.loop(); // Will start gtk. Will not return.
   #else
+    #if (INKPLATE_6PLUS || TOUCH_TRIAL)
+      // Touch builds: events queued during the warm-wake input-
+      // dead window (event_mgr.setup() runs before the rest of
+      // boot — fonts, page_locs, books_dir scan — and the touch
+      // driver pushes events into input_event_queue while the
+      // user's swipes, thinking they didn't register, multiply).
+      // Without this coalesce, the queued events drain one-at-a-
+      // time once the regular event_mgr.loop starts, firing each
+      // queued swipe as a separate page turn — page jumps several
+      // pages instead of the one the user expected.
+      //
+      // Drain the queue once and dispatch only the most recent
+      // event (latest user intent). Runs only on the first outer-
+      // loop pass; after that the queue is drained as events
+      // arrive in normal cadence.
+      bool first_iteration = true;
+    #endif
     while (true) {
       while (next_ctrl != Ctrl::NONE) launch();
+
+      #if (INKPLATE_6PLUS || TOUCH_TRIAL)
+        if (first_iteration) {
+          first_iteration = false;
+          EventMgr::Event coalesced = event_mgr.coalesce_pending_input();
+          if (coalesced.kind != EventMgr::EventKind::NONE) {
+            input_event(coalesced);
+            // continue → re-run the launch-loop in case the
+            // dispatched event triggered a controller transition
+            // (set_controller sets next_ctrl; only launch() applies
+            // it). Without continue we'd block in event_mgr.loop
+            // before the transition gets processed.
+            continue;
+          }
+        }
+      #endif
+
       event_mgr.loop();
     }
   #endif

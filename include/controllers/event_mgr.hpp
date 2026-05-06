@@ -63,6 +63,21 @@ class EventMgr
       void  get_position(uint16_t & x, uint16_t & y) { x = x_pos; y = y_pos; }
       void to_user_coord(uint16_t & x, uint16_t & y);
 
+      // Drain the input event queue non-blocking and return the
+      // MOST RECENT event encountered (or {NONE} if the queue
+      // was empty). Used at the end of warm-wake boot to
+      // coalesce swipes the user fired during the input-dead
+      // window: the touch driver pushes them into the queue
+      // while AppController is still spinning up; if the
+      // regular event loop drains them one-at-a-time after
+      // boot completes, every queued swipe fires as a separate
+      // page turn — surprising the user who only meant to
+      // turn the page once but kept swiping because nothing
+      // happened. Coalescing to the latest event captures the
+      // user's most recent intent and discards the "did it
+      // register?" retries.
+      Event coalesce_pending_input();
+
     #else
       enum class EventKind { NONE, NEXT, PREV, DBL_NEXT, DBL_PREV, SELECT, DBL_SELECT };
 

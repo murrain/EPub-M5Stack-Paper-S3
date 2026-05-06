@@ -373,6 +373,29 @@ void EventMgr::loop()
 #endif
 }
 
+EventMgr::Event EventMgr::coalesce_pending_input()
+{
+  Event coalesced{ EventKind::NONE, 0, 0, 0 };
+#if EPUB_INKPLATE_BUILD
+  if (input_event_queue == nullptr) return coalesced;
+
+  Event scratch;
+  size_t drained = 0;
+  // Non-blocking drain (timeout=0). Each xQueueReceive that
+  // succeeds overwrites `coalesced`, so we end with the most
+  // recent event. The queue has depth 10 (see input_event_queue
+  // creation) so this loop bounded by max queue depth.
+  while (xQueueReceive(input_event_queue, &scratch, 0) == pdTRUE) {
+    coalesced = scratch;
+    drained++;
+  }
+  if (drained > 1) {
+    LOG_I("warm-wake event coalesce: drained %u, dispatching latest", (unsigned) drained);
+  }
+#endif
+  return coalesced;
+}
+
 const EventMgr::Event & EventMgr::get_event()
 {
   static Event event{ EventKind::NONE };
