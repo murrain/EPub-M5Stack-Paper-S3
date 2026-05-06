@@ -256,8 +256,15 @@ static void touch_task(void * param)
         if (hold_sent) {
           ev.kind = EventMgr::EventKind::RELEASE;
         }
-        else if (abs_max_dx > abs_max_dy_signed) {
+        else if (abs_max_dx >= abs_max_dy_signed) {
           // Predominantly horizontal motion — candidate for left/right swipe.
+          // Tie-break favors horizontal: a perfectly diagonal swipe
+          // (|dx| == |dy|) would otherwise fall through to TAP and
+          // trigger an unintended page advance / menu open at the
+          // touch start position. Choosing horizontal here matches
+          // user ergonomics — the dominant gesture grammar in this
+          // app is left/right page turns, so the rare diagonal is
+          // closer to a horizontal sweep than a vertical drawer pull.
           bool meets_distance = abs_max_dx > (int)swipe_distance_threshold;
           bool meets_velocity = (abs_max_dx > (int)swipe_velocity_min_dx)
                              && (dt_ms      < swipe_velocity_max_dt_ms);

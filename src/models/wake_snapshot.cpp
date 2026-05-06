@@ -66,6 +66,15 @@ WakeSnapshot::capture(uint32_t book_id,
   // tap Power Off" — which gives the throttle plenty of idle time
   // to let a fresh capture through before sleep fires. PageCache
   // entries persisted alongside cover the neighborhood anyway.
+  // ESP::millis() is uint32_t wall-clock-from-boot — wraps at
+  // ~49.7 days. The unsigned subtraction is overflow-safe (modular
+  // arithmetic), but on the wrap boundary the delta computes as a
+  // large value rather than the true ~zero, which would let a
+  // capture through despite the throttle saying "old enough." That
+  // false negative is harmless — at worst we do one extra capture
+  // every ~49 days. The reverse case (false positive blocking a
+  // legitimate capture) is impossible because a small delta on
+  // either side of wrap stays small under modular arithmetic.
   uint32_t now_ms = (uint32_t) ESP::millis();
   if (captured_ && ((now_ms - last_capture_ms_) < MIN_CAPTURE_INTERVAL_MS)) {
     return false;
@@ -516,6 +525,12 @@ WakeSnapshot::invalidate()
 {
   std::scoped_lock guard(mutex_);
   captured_            = false;
+  // Symmetric reset: keeps "freshly invalidated" indistinguishable
+  // from "freshly constructed" so the throttle gate doesn't carry
+  // stale timestamp state across an invalidate. Defense-in-depth
+  // against a future change that drops the captured_ guard on the
+  // throttle check.
+  last_capture_ms_     = 0;
   cached_header_       = {};
   cached_primary_meta_ = {};
   if (remove(SNAPSHOT_PATH) == 0) {

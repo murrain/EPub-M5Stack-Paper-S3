@@ -41,6 +41,14 @@ namespace
   constexpr int RESIDENCY_AHEAD  = 4;
   constexpr int RESIDENCY_BEHIND = 1;
 
+  // Top-edge gesture target for both TAP and SWIPE_DOWN. Defined
+  // once at file scope so the menu's hit region can't drift between
+  // the two handlers from a one-sided tuning change. ~10% of the
+  // 960 px portrait panel — large enough to hit reliably with a
+  // thumb, small enough to leave the rest of the page for content
+  // taps + swipes.
+  constexpr uint16_t TOP_EDGE_PX = 80;
+
   // Compute the current ± N residency set. Caller (show_and_capture)
   // forwards to page_cache.request_residency. Skips entries when
   // page_locs runs out of pages in either direction; the user is
@@ -82,6 +90,8 @@ BookController::show_and_capture(const PageLocs::PageId & page_id)
                   epub.get_book_format_params(),
                   sizeof(EPub::BookFormatParams));
 
+  // Cache-hit fast path runs lock-free; safety story below.
+  //
   // Cache-hit fast path: if the PageCache has a complete pre-paint
   // bitmap for this page, blit it to the panel framebuffer and
   // commit via screen.update(FAST). Cache miss falls through to
@@ -111,6 +121,23 @@ BookController::show_and_capture(const PageLocs::PageId & page_id)
   //     evicted until request_residency runs (after this block).
   // The Phase A assertion was relaxed in the same commit to
   // match — see the comment in screen_paper_s3.cpp::update.
+  //
+  // POINTER LIFETIME: `cached` is the slot's framebuffer pointer
+  // returned by page_cache.get under cache_mutex_, then released
+  // before the memcpy reads from it. Three potential mutators of
+  // that slot:
+  //   - pre-paint's render_page_into writes to a slot only when
+  //     entries_[slot].complete == false; get() returns nullptr
+  //     for incomplete slots, so a "cached != nullptr" hit
+  //     guarantees the slot won't be written under us.
+  //   - inject_entry can replace any slot but is only called from
+  //     WakeSnapshot::hydrate_page_cache during BookController::
+  //     open_book_file — never during steady-state reading; we
+  //     can't be in show_and_capture for an open book at the
+  //     same time as that hydrate path.
+  //   - request_residency can evict, but it's called BELOW the
+  //     memcpy on this same thread.
+  // So `cached` is stable for the duration of this scope.
   bool cache_hit = false;
   const uint8_t * cached = page_cache.get(page_id, fh);
   if (cached != nullptr) {
@@ -366,11 +393,10 @@ BookController::open_book_file(
         //
         // Removes the previous "tap anywhere → menu" path that
         // accidentally triggered the menu when the user wanted to
-        // tap-advance a page in the center column. The top-edge
-        // strip is still big enough (80 px / ~10% of the panel
-        // height) to hit reliably without obscuring book content.
+        // tap-advance a page in the center column. TOP_EDGE_PX is
+        // a file-scope constant shared with the SWIPE_DOWN handler
+        // below.
         {
-          constexpr uint16_t TOP_EDGE_PX = 80;
           if (event.y < TOP_EDGE_PX) {
             app_controller.set_controller(AppController::Ctrl::PARAM);
           }
@@ -400,12 +426,11 @@ BookController::open_book_file(
         // the page (which is unusual but possible on accidental
         // contact) doesn't trigger the menu. event.y is the touch
         // start position — see event_mgr_paper_s3.cpp where the
-        // FSM stores start_x / start_y on first contact.
-        {
-          constexpr uint16_t TOP_PULL_REGION_PX = 80;
-          if (event.y < TOP_PULL_REGION_PX) {
-            app_controller.set_controller(AppController::Ctrl::PARAM);
-          }
+        // FSM stores start_x / start_y on first contact. Same
+        // TOP_EDGE_PX as the TAP handler above so the menu's hit
+        // region is consistent across gestures.
+        if (event.y < TOP_EDGE_PX) {
+          app_controller.set_controller(AppController::Ctrl::PARAM);
         }
         break;
 
