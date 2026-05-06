@@ -3,6 +3,9 @@
 
 #if defined(BOARD_TYPE_PAPER_S3)
 
+#include <cstring>
+#include "esp_heap_caps.h"
+
 extern "C" {
   #include <epdiy.h>
   #include <epd_highlevel.h>
@@ -34,6 +37,14 @@ static bool s_force_full = true;
 static int16_t s_partial_count = 0;
 static const int16_t PARTIAL_COUNT_ALLOWED = 10;
 static int s_temperature = 20; // TODO: hook real temperature sensor
+
+// True between a warm-wake screen.setup and the first content
+// update(). Triggers an epd_fullclear inside the s_force_full branch
+// of update() to flush the wallpaper / sleep-screen retention before
+// the new content paints. Cleared on the same update() call that
+// consumes it. See the comment at the consumption site for why a
+// plain GC16(forced) wasn't enough.
+static bool s_warm_wake_clear_pending = false;
 
 Screen Screen::singleton;
 
@@ -76,6 +87,40 @@ void Screen::update(UpdateMode mode)
   // preserves the historical short-circuit semantics: a pending forced
   // full update cannot be skipped by an explicit FORCE_PARTIAL/FAST.
   if (s_force_full) {
+    if (s_warm_wake_clear_pending) {
+      s_warm_wake_clear_pending = false;
+      // Wallpaper / sleep-screen retention surviving deep sleep
+      // does NOT clear with a single MODE_GC16 update. epdiy's HL
+      // tracks "previous panel state" and computes a delta against
+      // it; on warm wake that tracking starts at all-white (from
+      // epd_hl_set_all_white in setup) but the actual panel cells
+      // hold the wallpaper, so GC16's white->content waveform
+      // can't unwind cells that were never tracked as anything
+      // other than white. The user sees the wallpaper bleeding
+      // through the rendered page.
+      //
+      // Fix: drive the panel through the full clearing sequence
+      // so it actually matches the HL's all-white tracking, then
+      // paint the new content from a real white baseline. The
+      // application has already drawn the new content into
+      // s_framebuffer by the time we land here (update() is the
+      // commit point), so we save it, scrub, and restore.
+      const size_t fb_size = (EPD_WIDTH / 2) * EPD_HEIGHT;
+      uint8_t * fb_save = (uint8_t *) heap_caps_aligned_alloc(
+        16, fb_size, MALLOC_CAP_SPIRAM);
+      if (fb_save != nullptr) {
+        memcpy(fb_save, s_framebuffer, fb_size);
+        epd_hl_set_all_white(&s_hl);
+        epd_fullclear(&s_hl, s_temperature);
+        memcpy(s_framebuffer, fb_save, fb_size);
+        free(fb_save);
+      }
+      // If the PSRAM alloc fails (extremely unlikely with our
+      // current heap state), fall through to a plain GC16. The
+      // user will still see ghosting on this single transition,
+      // but the device stays up — better than a hard failure on
+      // the first warm-wake paint.
+    }
     run_update(MODE_GC16, s_temperature, "GC16(forced)");
     s_force_full = false;
     s_partial_count = PARTIAL_COUNT_ALLOWED;
@@ -172,12 +217,21 @@ void Screen::setup(PixelResolution resolution, Orientation orientation,
     // visible during the rest of boot. The first real render
     // (book page, books-dir, etc.) replaces it with a single
     // GC16 update, so the user sees one transition instead of
-    // black -> splash -> book. Forcing the next update to be a
-    // full refresh flushes any ghosting that may have built up
-    // during the long retention period.
-    s_force_full     = preserve_panel_image;
-    s_epd_initialized = true;
-    s_partial_count   = PARTIAL_COUNT_ALLOWED;
+    // black -> splash -> book.
+    //
+    // We also flag s_warm_wake_clear_pending so that first GC16
+    // is preceded by a proper epd_fullclear inside update().
+    // Without that, the wallpaper retention bleeds through the
+    // rendered page — GC16 alone is a delta waveform against
+    // the HL's tracked frame state (all-white), not the actual
+    // panel state (wallpaper). Doing the clear at first-render
+    // time (rather than here) keeps the wallpaper visible for
+    // the whole boot phase and consolidates the visual cost
+    // into a single transition.
+    s_force_full              = preserve_panel_image;
+    s_warm_wake_clear_pending = preserve_panel_image;
+    s_epd_initialized         = true;
+    s_partial_count           = PARTIAL_COUNT_ALLOWED;
   }
 
   // On Paper S3 we always drive the panel in grayscale (4-bit via epdiy).
