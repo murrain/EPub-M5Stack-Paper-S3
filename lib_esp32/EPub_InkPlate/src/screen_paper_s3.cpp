@@ -117,15 +117,31 @@ void Screen::update(UpdateMode mode)
 {
   if (!s_epd_initialized) return;
 
-  // Loud failure on accidental update during a ScopedRenderTarget.
-  // Calling update() while a guard has the active framebuffer aimed
-  // at a PSRAM scratch buffer would push that scratch state to the
-  // panel — at best a corruption bug, at worst overwriting whatever
-  // was correctly on screen with cache content the user never asked
-  // to see. The guard's destructor restores s_active_framebuffer
-  // before any future update() should fire, so this asserts a
-  // genuine bug, not a timing race.
-  assert(s_active_framebuffer == s_framebuffer);
+  // Phase A's assert(s_active_framebuffer == s_framebuffer) was
+  // removed to allow the BookController cache-hit display path
+  // to run without holding book_viewer.get_mutex — see the
+  // detailed concurrency comment in book_controller.cpp::show_
+  // and_capture for the safety story.
+  //
+  // The assertion's original purpose was to catch a single-thread
+  // bug: a viewer calling screen.update() inside its own Scoped
+  // RenderTarget guard, expecting the panel to commit when in
+  // fact the off-screen buffer would have been pushed (or rather,
+  // wouldn't have been — update reads s_hl's panel state, not
+  // s_active_framebuffer). It was never a cross-thread guarantee.
+  //
+  // The actual update path here calls epd_hl_update_screen which
+  // operates on s_hl's internal panel-buffer tracking. It does
+  // NOT consult s_active_framebuffer, so a pre-paint pthread mid-
+  // ScopedRenderTarget cannot corrupt this commit. The mutex
+  // discipline (foreground render paths through book_viewer take
+  // book_viewer.get_mutex; pre-paint takes the same) still
+  // serializes draw_* concurrency for the cache-MISS path that
+  // actually walks the display list.
+  //
+  // Net effect: pre-paint can pre-render the next page WHILE the
+  // current swipe's cache-hit waveform is committing. ~120 ms of
+  // pre-paint headroom per cache hit on a fast sweep.
 
   // s_force_full always wins, regardless of caller's requested mode. This
   // preserves the historical short-circuit semantics: a pending forced

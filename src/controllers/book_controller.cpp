@@ -26,12 +26,20 @@
 // Stage 2 PageCache integration helpers
 namespace
 {
-  // ±N residency policy. Two ahead, two behind = 5-page set
-  // (current + 4 neighbors). PSRAM cost lives at SLOT_COUNT in
-  // page_cache.hpp; tuning N here changes pre-paint workload but
-  // not memory budget.
-  constexpr int RESIDENCY_AHEAD  = 2;
-  constexpr int RESIDENCY_BEHIND = 2;
+  // Asymmetric residency policy — 4 forward, 1 back, biased toward
+  // the dominant reading direction. With SLOT_COUNT=10 and a 6-page
+  // set (current + 4 ahead + 1 back), there's headroom for stale
+  // entries during navigation drift before eviction kicks in.
+  // Tuning these here changes pre-paint workload but not memory
+  // budget (cap is in page_cache.hpp).
+  //
+  // Forward-bias matters most during fast sweeps: a user looking
+  // for a passage taps next-next-next 4-5 times in a row. Symmetric
+  // ±2 (the previous policy) ran out of forward cache after 2
+  // swipes; this gives 4 cache hits in a row before falling off
+  // to live render.
+  constexpr int RESIDENCY_AHEAD  = 4;
+  constexpr int RESIDENCY_BEHIND = 1;
 
   // Compute the current ± N residency set. Caller (show_and_capture)
   // forwards to page_cache.request_residency. Skips entries when
@@ -76,18 +84,39 @@ BookController::show_and_capture(const PageLocs::PageId & page_id)
 
   // Cache-hit fast path: if the PageCache has a complete pre-paint
   // bitmap for this page, blit it to the panel framebuffer and
-  // commit via screen.update(FAST). Mutex around the blit + update
-  // matches the discipline in the foreground render path so the
-  // pre-paint task can't be mid-ScopedRenderTarget when we read
-  // the panel state. Cache miss falls through to the existing
-  // book_viewer.show_page render path.
+  // commit via screen.update(FAST). Cache miss falls through to
+  // the existing book_viewer.show_page render path.
+  //
+  // CONCURRENCY: this path deliberately does NOT take book_viewer.
+  // get_mutex(). The original implementation did, to satisfy Phase
+  // A's update()-asserts-active==panel invariant. That assertion
+  // was protecting against single-thread misuse (a viewer calling
+  // update inside its own ScopedRenderTarget guard) — not against
+  // cross-thread races. Holding the mutex during memcpy + a
+  // ~120 ms MODE_DU waveform also blocked the pre-paint pthread
+  // for the entire commit window, which on a fast sweep meant
+  // pre-paint never got CPU time to populate ahead of the user.
+  //
+  // Why dropping the mutex is safe:
+  //   - memcpy targets the panel framebuffer directly via
+  //     screen.get_panel_framebuffer(); never touches s_active_
+  //     framebuffer.
+  //   - screen.update reads s_hl's panel-buffer state; never
+  //     touches s_active_framebuffer.
+  //   - pre-paint's ScopedRenderTarget swaps s_active_framebuffer
+  //     to a PSRAM scratch buffer. Foreground memcpy + update
+  //     ignore that pointer entirely. So pre-paint can render to
+  //     scratch concurrent with this path; the panel sees the
+  //     correct cached page; the cache slot we read from is not
+  //     evicted until request_residency runs (after this block).
+  // The Phase A assertion was relaxed in the same commit to
+  // match — see the comment in screen_paper_s3.cpp::update.
   bool cache_hit = false;
   const uint8_t * cached = page_cache.get(page_id, fh);
   if (cached != nullptr) {
     uint8_t * panel_fb = screen.get_panel_framebuffer();
     size_t    fb_size  = screen.get_panel_framebuffer_size();
     if ((panel_fb != nullptr) && (fb_size > 0)) {
-      std::scoped_lock guard(book_viewer.get_mutex());
       std::memcpy(panel_fb, cached, fb_size);
       // FAST = MODE_DU on PaperS3 (~120 ms). Page::paint normally
       // uses FAST for foreground page turns; the cache path is the

@@ -80,10 +80,19 @@ class PageCache
       size_t            fb_size;
     };
 
-    // Maximum simultaneously-cached pages. Sized for "current ± 3"
-    // around a reader's position. PSRAM cost: SLOT_COUNT *
-    // get_panel_framebuffer_size() = 7 * ~256 KB ≈ 1.8 MB.
-    static constexpr size_t SLOT_COUNT = 7;
+    // Maximum simultaneously-cached pages. Sized to comfortably hold
+    // the BookController residency set (current + 4 forward + 1 back
+    // = 6 entries) plus a small headroom buffer for stale entries
+    // that haven't been evicted yet during navigation drift. PSRAM
+    // cost: SLOT_COUNT * get_panel_framebuffer_size() = 10 *
+    // ~256 KB ≈ 2.5 MB out of 8 MB available — comfortably within
+    // budget.
+    //
+    // Forward-bias rationale: reading is overwhelmingly forward-
+    // dominant. With the previous symmetric ±2 set, a fast forward
+    // sweep exhausted the cache after 2 swipes; now the user gets
+    // 4 cached forward swipes before falling off into live render.
+    static constexpr size_t SLOT_COUNT = 10;
 
     PageCache();
     ~PageCache();
