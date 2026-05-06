@@ -32,6 +32,15 @@ class MenuControllerBase
     void input_event(const EventMgr::Event & event);
 
   protected:
+    // Virtual destructor for safety. Today the menu controllers
+    // exist only as concrete global singletons (book_param_-
+    // controller, option_controller) and are never deleted via
+    // a base pointer, so there's no UB without it. Add it
+    // anyway — the class has virtual methods, and pairing them
+    // with a non-virtual destructor is a standing landmine for
+    // anyone who later holds a MenuControllerBase* and deletes.
+    virtual ~MenuControllerBase() = default;
+
     // True when any sub-form / sub-state with its own dismiss
     // handshake is active. The envelope uses this answer for
     // two decisions:
@@ -48,13 +57,4 @@ class MenuControllerBase
     // true. The sub-state owns the event entirely — no fall-
     // through to the menu viewer when this is invoked.
     virtual void dispatch_to_sub_state(const EventMgr::Event & event) = 0;
-
-    // Hook called immediately before set_controller(LAST) on
-    // dismissal — both the SWIPE_UP path and the menu_viewer-
-    // says-done path. Subclass uses this to flush deferred
-    // side-effects (OptionController's books_dir.refresh on a
-    // queued books_refresh_needed). Default is a no-op so
-    // controllers without dismiss-time side-effects don't need
-    // to override.
-    virtual void on_before_dismiss() {}
 };

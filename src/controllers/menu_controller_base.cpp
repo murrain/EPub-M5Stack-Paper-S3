@@ -16,7 +16,6 @@ MenuControllerBase::input_event(const EventMgr::Event & event)
   // own their own cancel/OK handshake and must not be bypassed.
   if (Gestures::is_menu_dismiss(event) && !has_active_sub_state()) {
     menu_viewer.clear_highlight();
-    on_before_dismiss();
     app_controller.set_controller(AppController::Ctrl::LAST);
     return;
   }
@@ -33,9 +32,13 @@ MenuControllerBase::input_event(const EventMgr::Event & event)
   // Top-level menu: if menu_viewer.event returns true, the user
   // selected an action that ends in returning to the previous
   // controller (typically because the action callback fired and
-  // the menu is done).
+  // the menu is done). Mirror the SWIPE_UP path's clear_highlight
+  // so both dismiss paths look identical to a future maintainer —
+  // today menu_viewer.event only returns true on the button-build
+  // DBL_SELECT path, but tying the two paths together prevents
+  // drift if a future touch-build action ever returns true.
   if (menu_viewer.event(event)) {
-    on_before_dismiss();
+    menu_viewer.clear_highlight();
     app_controller.set_controller(AppController::Ctrl::LAST);
   }
 }

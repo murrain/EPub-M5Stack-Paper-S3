@@ -491,20 +491,6 @@ OptionController::has_active_sub_state() const
 }
 
 void
-OptionController::on_before_dismiss()
-{
-  // When the user dismisses the menu (via SWIPE_UP or via the
-  // menu_viewer signaling done), a refresh queued from the menu
-  // (e.g., the "Refresh the e-books list" entry) still needs to
-  // fire before control returns to the books-dir screen.
-  if (books_refresh_needed) {
-    books_refresh_needed = false;
-    int16_t dummy;
-    books_dir.refresh(nullptr, dummy, true);
-  }
-}
-
-void
 OptionController::dispatch_to_sub_state(const EventMgr::Event & event)
 {
   if (main_form_is_shown) {
@@ -617,11 +603,6 @@ OptionController::dispatch_to_sub_state(const EventMgr::Event & event)
                       "The device is now restarting. Please wait.");
       wait_for_key_after_wifi = false;
       stop_web_server();
-      if (books_refresh_needed) {
-        books_refresh_needed = false;
-        int16_t dummy;
-        books_dir.refresh(nullptr, dummy, true);
-      }
       esp_restart();
     }
   #endif

@@ -15,7 +15,6 @@ class OptionController : public MenuControllerBase
 
     bool main_form_is_shown;
     bool font_form_is_shown;
-    bool books_refresh_needed;
 
     #if DATE_TIME_RTC
       bool date_time_form_is_shown;
@@ -36,7 +35,6 @@ class OptionController : public MenuControllerBase
   public:
     OptionController() : main_form_is_shown(false),
                          font_form_is_shown(false),
-                         books_refresh_needed(false),
                          #if DATE_TIME_RTC
                            date_time_form_is_shown(false),
                          #endif
@@ -88,7 +86,6 @@ class OptionController : public MenuControllerBase
   protected:
     bool has_active_sub_state() const override;
     void dispatch_to_sub_state(const EventMgr::Event & event) override;
-    void on_before_dismiss() override;
 };
 
 #if __OPTION_CONTROLLER__
