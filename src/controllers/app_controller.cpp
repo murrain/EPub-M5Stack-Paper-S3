@@ -11,6 +11,7 @@
 #include "controllers/option_controller.hpp"
 #include "controllers/toc_controller.hpp"
 #include "controllers/event_mgr.hpp"
+#include "models/page_cache.hpp"
 #include "models/page_locs.hpp"
 #include "models/wake_snapshot.hpp"
 
@@ -135,6 +136,13 @@ AppController::going_to_deep_sleep()
     back_lit.turn_off();
     touch_screen.shutdown();
   #endif
+
+  // Stop pre-paint BEFORE the retriever — pre-paint's render path
+  // calls into page_locs (get_page_info) and epub state, both of
+  // which the retriever stop will tear down. Lock-order: cache,
+  // page_locs, epub. Same shape used in BooksDirController::enter
+  // for the regular nav-back teardown.
+  page_cache.stop();
 
   // Stop the page-locations retriever before any controller writes its
   // own state to flash. Without this, the RetrieverTask can be mid-build

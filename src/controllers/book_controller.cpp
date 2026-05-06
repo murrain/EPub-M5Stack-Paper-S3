@@ -9,24 +9,96 @@
 #include "controllers/books_dir_controller.hpp"
 #include "models/books_dir.hpp"
 #include "models/epub.hpp"
+#include "models/page_cache.hpp"
 #include "models/session_state.hpp"
 #include "models/wake_snapshot.hpp"
+#include "screen.hpp"
 #include "viewers/book_viewer.hpp"
 #include "viewers/page.hpp"
 #include "viewers/msg_viewer.hpp"
+
+#include <cstring>
 
 #if EPUB_INKPLATE_BUILD
   #include "nvs.h"
 #endif
 
+// Stage 2 PageCache integration helpers
+namespace
+{
+  // ±N residency policy. Two ahead, two behind = 5-page set
+  // (current + 4 neighbors). PSRAM cost lives at SLOT_COUNT in
+  // page_cache.hpp; tuning N here changes pre-paint workload but
+  // not memory budget.
+  constexpr int RESIDENCY_AHEAD  = 2;
+  constexpr int RESIDENCY_BEHIND = 2;
+
+  // Compute the current ± N residency set. Caller (show_and_capture)
+  // forwards to page_cache.request_residency. Skips entries when
+  // page_locs runs out of pages in either direction; the user is
+  // near a book edge and the cache simply holds fewer entries.
+  // get_next/prev_page_id are mutex-safe internally.
+  void compute_residency_set(const PageLocs::PageId & current,
+                             PageLocs::PageId * out,
+                             size_t & out_count)
+  {
+    out_count = 0;
+    out[out_count++] = current;
+    PageLocs::PageId pid = current;
+    for (int k = 0; k < RESIDENCY_AHEAD; ++k) {
+      const PageLocs::PageId * next = page_locs.get_next_page_id(pid);
+      if (next == nullptr) break;
+      out[out_count++] = *next;
+      pid = *next;
+    }
+    pid = current;
+    for (int k = 0; k < RESIDENCY_BEHIND; ++k) {
+      const PageLocs::PageId * prev = page_locs.get_prev_page_id(pid);
+      if (prev == nullptr) break;
+      out[out_count++] = *prev;
+      pid = *prev;
+    }
+  }
+}
+
 // Single rendering + snapshot-capture path. Every navigation handler
 // below goes through here rather than calling book_viewer.show_page
-// directly — that keeps BookViewer a pure renderer and ensures every
-// painted page is also captured for the warm-wake fast path.
+// directly — that keeps BookViewer a pure renderer, ensures every
+// painted page is also captured for the warm-wake fast path, and
+// (Stage 2) gives a single point where the PageCache cache-hit
+// shortcut and the post-display pre-paint trigger live.
 void
 BookController::show_and_capture(const PageLocs::PageId & page_id)
 {
-  book_viewer.show_page(page_id);
+  uint32_t fh = WakeSnapshot::format_params_hash(
+                  epub.get_book_format_params(),
+                  sizeof(EPub::BookFormatParams));
+
+  // Cache-hit fast path: if the PageCache has a complete pre-paint
+  // bitmap for this page, blit it to the panel framebuffer and
+  // commit via screen.update(FAST). Mutex around the blit + update
+  // matches the discipline in the foreground render path so the
+  // pre-paint task can't be mid-ScopedRenderTarget when we read
+  // the panel state. Cache miss falls through to the existing
+  // book_viewer.show_page render path.
+  bool cache_hit = false;
+  const uint8_t * cached = page_cache.get(page_id, fh);
+  if (cached != nullptr) {
+    uint8_t * panel_fb = screen.get_panel_framebuffer();
+    size_t    fb_size  = screen.get_panel_framebuffer_size();
+    if ((panel_fb != nullptr) && (fb_size > 0)) {
+      std::scoped_lock guard(book_viewer.get_mutex());
+      std::memcpy(panel_fb, cached, fb_size);
+      // FAST = MODE_DU on PaperS3 (~120 ms). Page::paint normally
+      // uses FAST for foreground page turns; the cache path is the
+      // same UX but without the layout work.
+      screen.update(Screen::UpdateMode::FAST);
+      cache_hit = true;
+    }
+  }
+  if (!cache_hit) {
+    book_viewer.show_page(page_id);
+  }
 
   // Identify the book by its NVS id so the snapshot meta survives the
   // sorted-index reshuffle that read_books_directory does each session.
@@ -36,10 +108,18 @@ BookController::show_and_capture(const PageLocs::PageId & page_id)
   int16_t  bidx = books_dir_controller.get_current_book_index();
   uint32_t book_id = 0;
   if ((bidx >= 0) && books_dir.get_book_id((uint16_t)bidx, book_id)) {
-    uint32_t fh = WakeSnapshot::format_params_hash(
-                    epub.get_book_format_params(),
-                    sizeof(EPub::BookFormatParams));
     wake_snapshot.capture(book_id, page_id, fh);
+  }
+
+  // Trigger pre-paint of the residency set so the next swipe lands
+  // on a cache hit. Done AFTER display so the user-perceived path
+  // isn't gated on pre-paint work. request_residency is non-blocking
+  // — it just enqueues jobs onto the pre-paint task's queue.
+  if (page_cache.is_active()) {
+    PageLocs::PageId set[1 + RESIDENCY_AHEAD + RESIDENCY_BEHIND];
+    size_t n = 0;
+    compute_residency_set(page_id, set, n);
+    page_cache.request_residency(set, n, fh);
   }
 }
 
@@ -126,11 +206,24 @@ BookController::open_book_file(
 
   bool new_document = book_filename != epub.get_current_filename();
 
-  if (new_document) page_locs.stop_document();
+  if (new_document) {
+    // Stop pre-paint BEFORE stop_document — pre-paint task may
+    // hold book_viewer.get_mutex() and dereference page_locs.item_
+    // info during render. Lock-order: cache stop, then page_locs
+    // stop, then file close. Same shape used in BooksDirController
+    // ::enter for the regular nav-back teardown.
+    page_cache.stop();
+    page_locs.stop_document();
+  }
 
   if (epub.open_file(book_filename)) {
     if (new_document) {
       page_locs.start_new_document(epub.get_item_count(), page_id.itemref_index);
+      // Re-enable cache for this book. Allocation may fail (PSRAM
+      // tight) — that's fine, foreground render still works and
+      // is_active() returns false so show_and_capture skips the
+      // residency request.
+      page_cache.start();
     }
     else {
       page_locs.check_for_format_changes(epub.get_item_count(), page_id.itemref_index);
