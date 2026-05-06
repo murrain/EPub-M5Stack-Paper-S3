@@ -314,10 +314,65 @@ BooksDirController::enter()
   #endif
 }
 
-void 
+void
 BooksDirController::leave(bool going_to_deep_sleep)
 {
 
+}
+
+void
+BooksDirController::refresh_view()
+{
+  // Refresh-view is the in-place redraw entry point. It deliberately
+  // skips the book-session teardown that enter() does (page_cache.
+  // stop / page_locs.stop_document / epub.close_file), because by
+  // construction no book session is open: the only way to open a
+  // book transitions OUT of DIR (show_last_book / tap-to-open both
+  // call set_controller(BOOK)). If a future caller invokes this
+  // from a state where a book IS open, the missing teardown would
+  // leak resources and race the live book session against the
+  // refresh's repaint. Catch that misuse early.
+  assert(!epub.is_file_open());
+
+  // The books_dir database may have grown or shrunk during the
+  // refresh. Clamp current_book_index to a valid range before
+  // re-rendering — show_page_and_highlight will further clamp
+  // internally but we want to give it a sensible starting point.
+  // Note: an empty post-refresh library (book_count == 0)
+  // propagates to show_page_and_highlight unchecked, same as
+  // enter() at line 291. If that ever surfaces as a bug, both
+  // sites need the same guard. Pre-existing condition.
+  if (current_book_index < 0 ||
+      current_book_index >= books_dir.get_book_count()) {
+    current_book_index = 0;
+  }
+
+  // Re-derive the viewer pointer in case dir_view changed since
+  // last enter() (matches enter()'s pattern). show_page_and_-
+  // highlight then redraws the books area — using paint_region
+  // under the hood, so the persistent strip's framebuffer +
+  // panel pixels are not touched.
+  //
+  // No screen.force_full_update() here (unlike enter()):
+  // msg_viewer's "Refreshing..." banner was painted via a
+  // normal BUDGETED update, so a region repaint cleanly
+  // overwrites it. Forcing a full GC16 would be a wasted
+  // ~700 ms refresh with no ghost-cleanup benefit.
+  config.get(Config::Ident::DIR_VIEW, &viewer_id);
+  books_dir_viewer = (viewer_id == LINEAR_VIEWER)
+                       ? (BooksDirViewer *) &linear_books_dir_viewer
+                       : (BooksDirViewer *) &matrix_books_dir_viewer;
+  books_dir_viewer->setup();
+  current_book_index = books_dir_viewer->show_page_and_highlight(current_book_index);
+
+  #if (INKPLATE_6PLUS || TOUCH_TRIAL)
+    // Strip was overwritten by msg_viewer.show inside refresh —
+    // restore. show_page_and_highlight's paint_region only
+    // touches the books area, but msg_viewer's earlier full-
+    // screen paint clobbered the strip's framebuffer pixels and
+    // panel pixels both, so the strip needs a fresh paint here.
+    option_controller.show_menu();
+  #endif
 }
 
 #if INKPLATE_6PLUS || TOUCH_TRIAL

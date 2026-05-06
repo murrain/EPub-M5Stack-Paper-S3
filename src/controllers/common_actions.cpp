@@ -38,7 +38,35 @@ CommonActions::refresh_books_dir()
   int16_t temp;
 
   books_dir.refresh(nullptr, temp, true);
-  app_controller.set_controller(AppController::Ctrl::DIR);
+
+  #if (INKPLATE_6PLUS || TOUCH_TRIAL)
+    // Touch builds with the persistent strip: this action was
+    // dispatched from inside BooksDirController::input_event,
+    // so we never left DIR. set_controller(DIR) would be a
+    // no-op and DIR.enter wouldn't fire — the now-refreshed
+    // books list never gets redrawn and msg_viewer's
+    // "Refreshing..." banner sits on screen. Re-render in
+    // place via the dedicated refresh_view path.
+    //
+    // Drain any input events the user fired during the long
+    // synchronous SD scan (they may have tapped "TAP to
+    // continue" repeatedly thinking nothing was happening).
+    // Without this drain, the queued taps would dispatch
+    // immediately after refresh_view repaints, opening books
+    // or menu items the user never meant to tap.
+    {
+      EventMgr::Event drained = event_mgr.coalesce_pending_input();
+      (void) drained;  // discard — we don't want to honor
+                       // post-refresh ghost taps.
+    }
+    books_dir_controller.refresh_view();
+  #else
+    // Button builds: action was dispatched from modal OPTION;
+    // transitioning back to DIR triggers DIR.enter which
+    // redraws the list as a side effect of the leave/enter
+    // dance.
+    app_controller.set_controller(AppController::Ctrl::DIR);
+  #endif
 }
 
 void
