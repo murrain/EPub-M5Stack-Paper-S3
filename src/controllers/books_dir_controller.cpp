@@ -304,12 +304,16 @@ BooksDirController::leave(bool going_to_deep_sleep)
 
     const BooksDir::EBookRecord * book;
 
-    // Top-edge gesture opens the books-dir menu (TAP-at-top OR
-    // SWIPE_DOWN-from-top). Centralized predicate; see gestures.hpp.
-    // Must run before TAP dispatch — a tap at the top edge is
-    // unambiguously a menu open, not a (potentially failed) book
-    // selection.
-    if (Gestures::is_menu_open(event)) {
+    // SWIPE_DOWN-from-top opens the menu (the unambiguous "drawer
+    // pull" gesture). NOT is_menu_open — that variant also fires
+    // on TAP-at-top, which steals the first-row book selection
+    // in matrix view (the first cover sits at y<TOP_EDGE_PX) and
+    // the top-of-list cell in linear view. The TAP case below
+    // already does book-hit-first with an OPTION fallback when
+    // no book is hit at the tap location, so a tap-at-top with
+    // no book under it still opens the menu — just via the
+    // hit-test path instead of an early return.
+    if (Gestures::is_menu_open_swipe(event)) {
       current_book_index = -1;
       app_controller.set_controller(AppController::Ctrl::OPTION);
       return;
@@ -325,34 +329,38 @@ BooksDirController::leave(bool going_to_deep_sleep)
         break;
 
       case EventMgr::EventKind::TAP:
-        if ((viewer_id == MATRIX_VIEWER) || (event.x < (Screen::get_width() / 3))) {
-          current_book_index = books_dir_viewer->get_index_at(event.x, event.y);
-          if ((current_book_index >= 0) && (current_book_index < books_dir.get_book_count())) {
-            book = books_dir.get_book_data(current_book_index);
-            if (book != nullptr) {
-              last_read_book_index = current_book_index;
-              book_fname    = BOOKS_FOLDER "/";
-              book_fname   += book->filename;
-              book_title    = book->title;
-              book_filename = book->filename;
+        // Universal hit-test: a tap that lands on a book selects
+        // it, regardless of which view is active. LinearBooksDir-
+        // Viewer::get_index_at hits the full row width (no x-
+        // filter — see its impl), so a tap on the title or author
+        // text selects the same book as a tap on the cover. Matrix
+        // view already worked this way. The legacy "tap on right
+        // two-thirds in linear view → menu" path is gone — menu
+        // open is the SWIPE_DOWN-from-top gesture, plus the
+        // fall-through here when get_index_at returns no hit
+        // (tap below the last row, or on a partial-page edge).
+        current_book_index = books_dir_viewer->get_index_at(event.x, event.y);
+        if ((current_book_index >= 0) && (current_book_index < books_dir.get_book_count())) {
+          book = books_dir.get_book_data(current_book_index);
+          if (book != nullptr) {
+            last_read_book_index = current_book_index;
+            book_fname    = BOOKS_FOLDER "/";
+            book_fname   += book->filename;
+            book_title    = book->title;
+            book_filename = book->filename;
 
-              PageLocs::PageId page_id = { 0, 0 };
+            PageLocs::PageId page_id = { 0, 0 };
 
-              #if EPUB_INKPLATE_BUILD
-                NVSMgr::NVSData nvs_data;
-                if (nvs_mgr.get_location(book->id, nvs_data)) {
-                  page_id = { nvs_data.itemref_index, nvs_data.offset };
-                }
-              #endif
-
-              if (book_controller.open_book_file(book_title, book_fname, page_id)) {
-                app_controller.set_controller(AppController::Ctrl::BOOK);
+            #if EPUB_INKPLATE_BUILD
+              NVSMgr::NVSData nvs_data;
+              if (nvs_mgr.get_location(book->id, nvs_data)) {
+                page_id = { nvs_data.itemref_index, nvs_data.offset };
               }
+            #endif
+
+            if (book_controller.open_book_file(book_title, book_fname, page_id)) {
+              app_controller.set_controller(AppController::Ctrl::BOOK);
             }
-          }
-          else {
-            current_book_index = -1;
-            app_controller.set_controller(AppController::Ctrl::OPTION);
           }
         }
         else {
