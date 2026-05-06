@@ -218,6 +218,12 @@ void
 MenuViewer::clear_highlight()
 {
   #if (INKPLATE_6PLUS || TOUCH_TRIAL)
+    // Nothing to clear if no hint is currently drawn — skip the
+    // commit_region call so we don't burn a DU on the strip for
+    // an unchanged framebuffer (the SWIPE_UP dismiss path always
+    // calls this, and most of the time hint_shown is already false).
+    if (!hint_shown) return;
+
     Page::Format fmt = {
       .line_height_factor =   1.0,
       .font_index         =     1,
@@ -244,16 +250,14 @@ MenuViewer::clear_highlight()
 
     page.start(fmt);
 
-    if (hint_shown) {
-      hint_shown     = false;
+    hint_shown = false;
 
-      page.clear_highlight(
-        Dim(entry_locs[current_entry_index].dim.width + 8, entry_locs[current_entry_index].dim.height + 8),
-        Pos(entry_locs[current_entry_index].pos.x - 4,     entry_locs[current_entry_index].pos.y - 4     ));
+    page.clear_highlight(
+      Dim(entry_locs[current_entry_index].dim.width + 8, entry_locs[current_entry_index].dim.height + 8),
+      Pos(entry_locs[current_entry_index].pos.x - 4,     entry_locs[current_entry_index].pos.y - 4     ));
 
-      page.clear_region(Dim(Screen::get_width(), text_height), Pos(0, text_ypos - line_height));
-      page.put_str_at(TOUCH_AND_HOLD_STR, Pos{ 10, text_ypos }, fmt);
-    }
+    page.clear_region(Dim(Screen::get_width(), text_height), Pos(0, text_ypos - line_height));
+    page.put_str_at(TOUCH_AND_HOLD_STR, Pos{ 10, text_ypos }, fmt);
 
     // Highlight clear is a transient UI tweak — DU is fine.
     commit_region(Screen::UpdateMode::FAST);

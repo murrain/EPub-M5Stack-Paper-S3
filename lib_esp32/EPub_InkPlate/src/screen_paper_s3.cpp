@@ -245,27 +245,6 @@ void Screen::panel_clear()
   epd_fullclear(&s_hl, s_temperature);
 }
 
-// Map a logical (post-rotation) rectangle to physical panel
-// coordinates. The display is set to EPD_ROT_INVERTED_PORTRAIT
-// (see setup at line ~191), so the caller-visible 540x960 logical
-// space rotates 90° (and inverts) into the panel's native 960x540.
-// Specifically:
-//   physical_x = logical_y
-//   physical_y = (EPD_HEIGHT - 1) - logical_x
-// Bounding box for a logical rect:
-//   px range = [ly, ly+lh-1]              → length lh
-//   py range = [EPD_HEIGHT-(lx+lw), EPD_HEIGHT-1-lx] → length lw
-static EpdRect logical_rect_to_physical(uint16_t lx, uint16_t ly,
-                                        uint16_t lw, uint16_t lh)
-{
-  EpdRect r;
-  r.x      = (int) ly;
-  r.y      = (int) (EPD_HEIGHT - (lx + lw));
-  r.width  = (int) lh;
-  r.height = (int) lw;
-  return r;
-}
-
 void Screen::update_region(Pos pos, Dim dim, UpdateMode mode)
 {
   if (!s_epd_initialized) return;
@@ -282,7 +261,11 @@ void Screen::update_region(Pos pos, Dim dim, UpdateMode mode)
     return;
   }
 
-  EpdRect area = logical_rect_to_physical(pos.x, pos.y, dim.width, dim.height);
+  // epd_hl_update_area takes coordinates in the LOGICAL (post-
+  // rotation) space — see _inverse_rotated_area in epdiy/highlevel.c
+  // which un-rotates the rect back to panel-native before driving
+  // the waveform. Pass logical coords directly.
+  EpdRect area = { pos.x, pos.y, dim.width, dim.height };
 
   EpdDrawMode epd_mode;
   const char * label;
