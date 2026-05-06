@@ -64,22 +64,23 @@ bool UsbMsc::start()
   msc_cfg.medium.card = card;
   msc_cfg.mount_point = TINYUSB_MSC_STORAGE_MOUNT_USB;
 
+  // tinyusb_msc_new_storage_sdmmc auto-installs the MSC class driver
+  // internally if it isn't already installed (see esp_tinyusb v2's
+  // tinyusb_msc.c around the `need_to_install_driver` branch). So we
+  // do NOT call tinyusb_msc_install_driver afterwards — that would
+  // return ESP_ERR_INVALID_STATE because the driver is now installed.
+  // The previous version of this file did that and the fail path
+  // surfaced as the menu's "Could not initialize the USB Mass Storage
+  // stack" alert.
+  //
+  // If we ever need a custom MSC callback (e.g. for FATFS-vs-USB
+  // ownership transitions), the order would be: install_driver with
+  // the custom config FIRST, then new_storage_sdmmc — the latter
+  // detects the driver is already installed and skips its own
+  // default install.
   esp_err_t ret = tinyusb_msc_new_storage_sdmmc(&msc_cfg, &s_msc_handle);
   if (ret != ESP_OK) {
     LOG_E("tinyusb_msc_new_storage_sdmmc failed (%s)", esp_err_to_name(ret));
-    return false;
-  }
-
-  // Install the MSC class driver: registers LUNs and the SCSI
-  // emulation that translates host bulk transfers into block I/O
-  // against the storage handle above. Defaults zero-init to the
-  // recommended values (no auto-mount-off, no callbacks).
-  tinyusb_msc_driver_config_t msc_drv_cfg = {};
-  ret = tinyusb_msc_install_driver(&msc_drv_cfg);
-  if (ret != ESP_OK) {
-    LOG_E("tinyusb_msc_install_driver failed (%s)", esp_err_to_name(ret));
-    tinyusb_msc_delete_storage(s_msc_handle);
-    s_msc_handle = nullptr;
     return false;
   }
 
