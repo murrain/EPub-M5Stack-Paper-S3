@@ -388,10 +388,7 @@ static MenuViewer::MenuEntry menu[] = {
   { MenuViewer::Icon::FONT_PARAMS,   "Default e-books parameters",           default_parameters               , true,  true  },
   { MenuViewer::Icon::WIFI,          "WiFi Access to the e-books folder",    wifi_mode                        , true,  true  },
   #if EPUB_INKPLATE_BUILD && defined(BOARD_TYPE_PAPER_S3)
-    // Reuses the WIFI icon glyph for v1 — both entries are
-    // "external file-transfer" features and the labels make the
-    // distinction. A dedicated USB-cable glyph can be added later.
-    { MenuViewer::Icon::WIFI,        "USB Drive Mode (mount SD on computer)", usb_drive_mode                   , true,  true  },
+    { MenuViewer::Icon::USB_DRIVE,   "USB Drive Mode (mount SD on computer)", usb_drive_mode                   , true,  true  },
   #endif
   { MenuViewer::Icon::REFRESH,       "Refresh the e-books list",             CommonActions::refresh_books_dir , true,  true  },
   #if !(INKPLATE_6PLUS || MENU_6PLUS)
