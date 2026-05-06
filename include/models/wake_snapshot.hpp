@@ -97,20 +97,29 @@ class WakeSnapshot
                           uint32_t * format_hash_out);
 
     // Discard the on-disk snapshot file AND drop the in-memory
-    // capture. Expected callers (none yet wired — Stage 2 work):
-    //   - BookParamController, after epub.update_book_format_params()
-    //     fires (font size, font index, show-images toggle, etc.)
+    // capture. Caller hook status:
+    //
+    //   WIRED:
+    //   - BookParamController::input_event after
+    //     epub.update_book_format_params() fires from the params form
+    //     (font size, font index, show-images toggle, etc.)
+    //   - BookParamController::revert_to_defaults after the equivalent
+    //     update_book_format_params() in the revert path
+    //
+    //   DEFERRED (Stage 2):
     //   - OptionController, after orientation change
     //   - BookController::open_book_file when a different book is
-    //     opened (book_id mismatch with the persisted snapshot)
+    //     opened (book_id mismatch with the persisted snapshot —
+    //     would use the book_id_out from restore_to_panel)
     //   - main.cpp warm-wake, when restore_to_panel returns a valid
     //     snapshot whose book_id / format_hash don't match the book
     //     the controller will re-open
     //
-    // Until those hooks land the on-disk snapshot can occasionally
-    // get a few seconds of "wrong-format flash before the real
-    // render replaces it" UX — Stage 1 ships with that as a known
-    // limitation rather than half-wired invalidation logic.
+    // Until the deferred hooks land the on-disk snapshot can
+    // occasionally show a few seconds of "wrong-content flash before
+    // the real render replaces it" UX on cross-book wakes — the
+    // wired hooks cover the format-edit case which is the most
+    // common source of staleness.
     void invalidate();
 
     // Compute a stable hash over the BookFormatParams bytes the user

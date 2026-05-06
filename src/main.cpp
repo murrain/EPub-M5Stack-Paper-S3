@@ -165,6 +165,16 @@
         // the s_force_full + s_warm_wake_clear_pending fullclear+GC16
         // path, so the panel cleanly transitions wallpaper -> page.
         if (SessionState::is_warm_wake()) {
+          // Stage 2: capture the three out-params (book_id_out,
+          // page_id_out, format_hash_out) and stash them somewhere
+          // BookController::open_book_file can read so it can call
+          // wake_snapshot.invalidate() if the about-to-open book
+          // doesn't match the painted snapshot. Right now we paint
+          // unconditionally and rely on the BookParamController
+          // invalidate hooks to catch format-edit staleness; a
+          // user who navigates to a different book between sleep
+          // and wake will see ~2-4 s of stale content before the
+          // real render replaces it.
           if (wake_snapshot.restore_to_panel(nullptr, nullptr, nullptr)) {
             LOG_I("warm-wake: snapshot painted, continuing boot");
           }
