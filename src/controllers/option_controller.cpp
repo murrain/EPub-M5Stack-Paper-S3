@@ -230,10 +230,26 @@ usb_drive_mode()
   if (UsbMsc::start()) {
     option_controller.set_wait_for_key_after_usb();
   } else {
+    // Surface the specific failure step + esp_err_t on the alert
+    // dialog so the user can diagnose without a serial monitor.
+    // Without this, every USB-side init failure looks identical,
+    // and field debugging requires a wired-up host.
+    const char * step;
+    switch (UsbMsc::last_error()) {
+      case UsbMsc::StartError::NO_SD_CARD:
+        step = "no SD card mounted"; break;
+      case UsbMsc::StartError::NEW_STORAGE_SDMMC_FAILED:
+        step = "tinyusb_msc_new_storage_sdmmc"; break;
+      case UsbMsc::StartError::DRIVER_INSTALL_FAILED:
+        step = "tinyusb_driver_install"; break;
+      default:
+        step = "unknown"; break;
+    }
     msg_viewer.show(MsgViewer::MsgType::ALERT, false, true,
                     "USB Drive Mode failed",
-                    "Could not initialize the USB Mass Storage stack. "
-                    "The device will continue normally; please try again.");
+                    "Init failed at: %s (esp_err=%d). The device will "
+                    "continue normally; please try again.",
+                    step, UsbMsc::last_error_code());
   }
 }
 #endif

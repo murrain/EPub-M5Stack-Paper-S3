@@ -39,6 +39,18 @@
 
 namespace UsbMsc {
 
+  // Identifies which step of start() failed, surfaced through the
+  // last_error_*() accessors so the option_controller can print a
+  // specific reason on the alert dialog instead of the generic
+  // "Could not initialize" message. Useful for field diagnosis when
+  // a serial log isn't available.
+  enum class StartError {
+    NONE,
+    NO_SD_CARD,                ///< inkplate_platform.get_sd_card() returned nullptr
+    NEW_STORAGE_SDMMC_FAILED,  ///< tinyusb_msc_new_storage_sdmmc returned non-OK
+    DRIVER_INSTALL_FAILED,     ///< tinyusb_driver_install returned non-OK
+  };
+
   /// Initialize the USB stack as a MSC device backed by the on-board
   /// microSD card. The reader's FATFS mount is torn down inside this
   /// call so the host has exclusive block-level access. Returns true
@@ -46,6 +58,14 @@ namespace UsbMsc {
   /// On any failure path the SD card is left unmounted; caller should
   /// treat the device state as needing a restart.
   bool start();
+
+  /// After a failed start(), returns the step at which it failed.
+  /// NONE on success.
+  StartError last_error();
+  /// After a failed start(), returns the esp_err_t from the failing
+  /// API call (or ESP_OK if the failure was NO_SD_CARD which has no
+  /// ESP error code).
+  int last_error_code();
 
   /// True between a successful start() and an exit_via_restart(). Used
   /// by callers that want to render a different UI state while in MSC

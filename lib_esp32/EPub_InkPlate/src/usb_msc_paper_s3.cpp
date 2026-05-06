@@ -38,10 +38,16 @@ namespace
   // handle) and would also be needed for any future mount-point
   // toggle (tinyusb_msc_set_storage_mount_point).
   tinyusb_msc_storage_handle_t s_msc_handle = nullptr;
+
+  UsbMsc::StartError s_last_error = UsbMsc::StartError::NONE;
+  esp_err_t          s_last_error_code = ESP_OK;
 }
 
 bool UsbMsc::start()
 {
+  s_last_error      = StartError::NONE;
+  s_last_error_code = ESP_OK;
+
   if (s_active) {
     LOG_W("UsbMsc::start called twice; ignoring");
     return true;
@@ -50,6 +56,7 @@ bool UsbMsc::start()
   sdmmc_card_t * card = inkplate_platform.get_sd_card();
   if (card == nullptr) {
     LOG_E("UsbMsc::start: no SD card handle (call inkplate_platform.setup(true) first)");
+    s_last_error = StartError::NO_SD_CARD;
     return false;
   }
 
@@ -81,6 +88,8 @@ bool UsbMsc::start()
   esp_err_t ret = tinyusb_msc_new_storage_sdmmc(&msc_cfg, &s_msc_handle);
   if (ret != ESP_OK) {
     LOG_E("tinyusb_msc_new_storage_sdmmc failed (%s)", esp_err_to_name(ret));
+    s_last_error      = StartError::NEW_STORAGE_SDMMC_FAILED;
+    s_last_error_code = ret;
     return false;
   }
 
@@ -103,6 +112,8 @@ bool UsbMsc::start()
     LOG_E("tinyusb_driver_install failed (%s)", esp_err_to_name(ret));
     tinyusb_msc_delete_storage(s_msc_handle);
     s_msc_handle = nullptr;
+    s_last_error      = StartError::DRIVER_INSTALL_FAILED;
+    s_last_error_code = ret;
     return false;
   }
 
@@ -110,6 +121,9 @@ bool UsbMsc::start()
   LOG_I("USB Drive Mode active — host should see a removable disk");
   return true;
 }
+
+UsbMsc::StartError UsbMsc::last_error() { return s_last_error; }
+int UsbMsc::last_error_code() { return (int) s_last_error_code; }
 
 bool UsbMsc::is_active()
 {

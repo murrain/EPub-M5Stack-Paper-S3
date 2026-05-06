@@ -587,23 +587,35 @@ start_web_server()
   #endif
 
   if (wifi.start()) {
-    if (http_server_start() == ESP_OK) {
+    esp_err_t hres = http_server_start();
+    if (hres == ESP_OK) {
       esp_ip4_addr_t ip = wifi.get_ip_address();
-      msg_viewer.show(MsgViewer::MsgType::WIFI, true, true, 
-        "Web Server", 
+      msg_viewer.show(MsgViewer::MsgType::WIFI, true, true,
+        "Web Server",
         "The Web server is now running at ip " IPSTR ". To stop it, please " MSG ".", IP2STR(&ip));
     }
     else {
-      msg_viewer.show(MsgViewer::MsgType::ALERT, true, true, 
-        "Web Server Failed", 
-        "The Web server was not able to start. Correct the situation and try again.");
+      // Surface the specific httpd_start failure so a field-debug
+      // user without serial access can tell whether it's an
+      // out-of-memory situation, a port conflict, or something
+      // else. The mapping is the standard esp_err_to_name set;
+      // ESP_ERR_NO_MEM (0x101) is by far the most common on this
+      // hardware given how tight DMA-capable internal SRAM gets
+      // after the WiFi stack init.
+      msg_viewer.show(MsgViewer::MsgType::ALERT, true, true,
+        "Web Server Failed",
+        "httpd_start returned %s (0x%x). Most often this is "
+        "out-of-memory; reboot the device and try again.",
+        esp_err_to_name(hres), (unsigned)hres);
       wifi.stop();
     }
   }
   else {
-    msg_viewer.show(MsgViewer::MsgType::ALERT, true, true, 
-      "WiFi Startup Failed", 
-      "WiFi was not able to start the connection. Correct the situation and try again.");
+    msg_viewer.show(MsgViewer::MsgType::ALERT, true, true,
+      "WiFi Startup Failed",
+      "WiFi was not able to associate with the configured AP. "
+      "Check SSID/password in /sdcard/.config and AP signal, "
+      "then try again.");
     wifi.stop();
   }
 
