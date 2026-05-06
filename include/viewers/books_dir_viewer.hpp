@@ -40,6 +40,19 @@ class BooksDirViewer
       #endif
     }
 
+    // Helper for the strip-aware paint region: the rectangle
+    // OUTSIDE which the persistent menu strip lives. Used by
+    // both viewers' show_page when calling Page::paint_region —
+    // single source of truth so a future tweak to the geometry
+    // (e.g. a side gutter for a thumb-rest area) lands in one
+    // place. Position + dimension form the books area:
+    //   Pos(0, header), Dim(screen_width, screen_height - header)
+    static inline void get_books_region(Pos & pos, Dim & dim) {
+      const uint16_t header = get_header_height();
+      pos = Pos(0, header);
+      dim = Dim(Screen::get_width(), Screen::get_height() - header);
+    }
+
     virtual void                        setup() = 0;
 
     virtual int16_t   show_page_and_highlight(int16_t book_idx) = 0;

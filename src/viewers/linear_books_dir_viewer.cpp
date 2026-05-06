@@ -127,20 +127,23 @@ LinearBooksDirViewer::show_page(int16_t page_nbr, int16_t hightlight_item_idx)
 
   ScreenBottom::show(page_nbr, page_count);
 
-  // Region paint: clear+commit only the books area (y >=
-  // first_entry_ypos). The persistent menu strip above stays
-  // exactly as it was — both in the framebuffer and on the
-  // panel — so a page-nav refresh doesn't flicker or wipe the
-  // strip. screen.update_region forwards to a full update when
+  // Region paint: clear+commit only the books area. The
+  // persistent menu strip above stays exactly as it was — both
+  // in the framebuffer and on the panel — so a page-nav refresh
+  // doesn't flicker or wipe the strip.
+  //
+  // Invariant for this method: every draw operation above must
+  // emit at y >= first_entry_ypos (= header + 5). If a future
+  // change adds a draw at y < header, it'll silently corrupt
+  // the strip's framebuffer pixels (paint_region preserves them).
+  //
+  // screen.update_region forwards to a full update when
   // s_force_full / s_warm_wake_clear_pending is armed (initial
-  // DIR entry from cold/warm boot), so the first paint after
-  // those flags still does a full GC16; subsequent page navs
-  // are partial.
-  const int16_t header = BooksDirViewer::get_header_height();
-  page.paint_region(
-    Pos(0, header),
-    Dim(Screen::get_width(), Screen::get_height() - header),
-    Screen::UpdateMode::BUDGETED);
+  // DIR entry from boot), so the first paint after those flags
+  // still does a full GC16; subsequent page navs are partial.
+  Pos region_pos; Dim region_dim;
+  BooksDirViewer::get_books_region(region_pos, region_dim);
+  page.paint_region(region_pos, region_dim, Screen::UpdateMode::BUDGETED);
 }
 
 void

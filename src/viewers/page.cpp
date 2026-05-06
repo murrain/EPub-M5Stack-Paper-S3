@@ -392,7 +392,15 @@ Page::paint_region(Pos region_pos, Dim region_dim,
     // White-fill ONLY the region in the framebuffer. Pixels
     // outside the region (the strip area, on a books-dir
     // page-nav repaint) stay as they were.
-    screen.draw_rectangle(region_dim, region_pos, Screen::WHITE_COLOR);
+    //
+    // colorize_region is the flood-fill primitive;
+    // draw_rectangle would only trace the border (sets pixels
+    // along the perimeter but leaves the interior intact),
+    // which on a page-nav would composite the new page's text
+    // over the previous page's text — visible ghosting.
+    // CLEAR_REGION display-list entries take the same path
+    // (see emit_display_list).
+    screen.colorize_region(region_dim, region_pos, Screen::WHITE_COLOR);
   }
   // Emit the display list with NO global clear — the targeted
   // clear above handles the "render fresh content" need.
