@@ -70,7 +70,25 @@ uint16_t Screen::height = EPD_HEIGHT;
 void Screen::clear()
 {
   if (!s_epd_initialized) return;
-  epd_hl_set_all_white(&s_hl);
+  // Honor whichever framebuffer is currently active. In the default
+  // case s_active_framebuffer == s_framebuffer and epd_hl_set_all_
+  // white does the canonical panel clear (it touches s_hl's
+  // internal state too, which the panel-side update path expects).
+  // Inside a ScopedRenderTarget the active target is a PSRAM
+  // scratch buffer; epd_hl_set_all_white would clear the WRONG
+  // memory (panel, not the active off-screen buffer), so we fall
+  // through to a direct memset of the off-screen buffer.
+  //
+  // Without this fix, Page::paint_to_active_target(clear_screen=
+  // true) inside a guard would silently clear the panel back to
+  // white — exactly the side-effect the guard was created to
+  // prevent. Code-quality review on Phase B caught this.
+  if (s_active_framebuffer == s_framebuffer) {
+    epd_hl_set_all_white(&s_hl);
+  } else {
+    std::memset(s_active_framebuffer, 0xFF,
+                (size_t)((EPD_WIDTH / 2) * EPD_HEIGHT));
+  }
 }
 
 // The bool shim Screen::update(bool no_full) is defined inline in screen.hpp.

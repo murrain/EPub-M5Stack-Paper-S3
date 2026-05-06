@@ -468,9 +468,19 @@ class PageCachePrePaintInterp : public HTMLInterpreter
 
 bool render_page_into(uint8_t * fb, const PageLocs::PageId & page_id)
 {
-  // Look up the page span. get_page_info returns nullptr if the
-  // retriever hasn't computed this page yet — caller drops job
-  // and the residency request retries on next navigation.
+  // Note on book_viewer.get_mutex() interaction with page_locs.get_
+  // page_info: book_viewer.cpp::build_page_at temporarily UNLOCKS
+  // book_viewer.get_mutex() around its get_page_info call (lines
+  // 107-110 there) because get_page_info can block on the retriever
+  // and holding the BV mutex during that wait would deadlock the
+  // retriever (which itself wants the same mutex when it advances
+  // page state). Pre-paint runs at lower priority than the retriever
+  // and never holds the BV mutex long enough for that deadlock to
+  // matter — the worst case is the retriever stalls one item-render
+  // behind us. We accept the simpler "hold BV mutex for the whole
+  // function" pattern to avoid duplicating the unlock/lock dance,
+  // and document the divergence here so a future reviewer doesn't
+  // "fix" us into copy-pasting build_page_at's pattern.
   const PageLocs::PageInfo * info = page_locs.get_page_info(page_id);
   if (info == nullptr) {
     LOG_D("prepaint: page (%d,%d) not yet computed; dropping",
@@ -482,10 +492,18 @@ bool render_page_into(uint8_t * fb, const PageLocs::PageId & page_id)
     return false;
   }
 
-  // Load the item into epub.current_item_info. This races with
-  // mainTask's show_page if not serialized — book_viewer.get_mutex
-  // (held by caller) provides that serialization since both code
-  // paths take it.
+  // Load the item into epub.current_item_info via the ONE-ARG form
+  // of get_item_at_index — same pattern as BookViewer::build_page_
+  // at. The two-arg form (used by the retriever's build_page_locs)
+  // writes into a SEPARATE PageLocs::item_info member to avoid
+  // clobbering current_item_info while the retriever crawls items
+  // ahead of the user. We're rendering for visible-near-current
+  // display, not for ahead-scan, so the one-arg form is correct
+  // here. CAUTION: any future revision that releases book_viewer.
+  // get_mutex() mid-render — to yield, to wait on a queue, etc. —
+  // MUST switch to the two-arg form, otherwise mainTask's show_
+  // page can clobber current_item_info between our load and our
+  // build_pages_recurse.
   if (!epub.get_item_at_index(page_id.itemref_index)) {
     LOG_D("prepaint: get_item_at_index(%d) failed", (int) page_id.itemref_index);
     return false;

@@ -120,18 +120,39 @@ class PageCache
     // at render time can drop stale jobs. Caller (BookController)
     // computes the ± N set from current_page_id via page_locs.get_
     // next/prev_page_id.
+    //
+    // PRECONDITION: any entries already in the cache must have a
+    // format_hash equal to current_format_hash. This is enforced by
+    // every code path that changes format params calling invalidate_
+    // all FIRST (BookParamController format-edit + revert hooks).
+    // If a future caller mutates format params without invalidate,
+    // get() will correctly return nullptr for the stale slot but
+    // it will also occupy a slot until evicted by residency drift,
+    // wasting one cache entry until the user navigates away.
     void request_residency(const PageLocs::PageId * page_ids,
                            size_t n,
                            uint32_t current_format_hash);
 
     // Lookup. Returns the cached framebuffer pointer if there's a
     // complete entry for page_id whose format hash matches the
-    // current hash; otherwise returns nullptr. Caller MUST copy
-    // (or memcpy to panel framebuffer) before any subsequent cache
-    // mutating operation — the entry could be evicted by another
-    // thread the moment the cache mutex is released. In practice
-    // this means: get → memcpy → screen.update, all on mainTask
-    // before yielding.
+    // current hash; otherwise returns nullptr.
+    //
+    // POINTER LIFETIME CONTRACT: the returned pointer is valid
+    // only as long as the caller doesn't yield and no OTHER thread
+    // calls a cache-mutating method (request_residency, invalidate
+    // _all, stop). In practice this means: call get → memcpy the
+    // bytes you need → use the copy. Today the only caller is
+    // BookController::show_and_capture on mainTask, and the only
+    // mutating caller (besides mainTask) is the pre-paint thread
+    // — but pre-paint serializes with show_and_capture via book_
+    // viewer.get_mutex(), so the memcpy under that mutex is safe.
+    //
+    // If a future caller invokes invalidate_all from a non-mainTask
+    // context (e.g. a power-event handler), the BV-mutex won't help
+    // and the show_and_capture memcpy could race the slot becoming
+    // !in_use. At that point this API should be redesigned to take
+    // a destination buffer and copy under cache_mutex_; see code-
+    // quality review on Phase B.
     const uint8_t * get(const PageLocs::PageId & page_id,
                         uint32_t current_format_hash);
 
@@ -139,6 +160,21 @@ class PageCache
     // cache-mutex acquisition. The caller (WakeSnapshot v2) then
     // serializes them to SD. Output buffer must hold up to
     // SLOT_COUNT entries.
+    //
+    // POINTER LIFETIME CONTRACT (same as get()): each
+    // CompleteEntry::framebuffer is valid only as long as the
+    // caller doesn't yield and no other thread mutates the cache.
+    // Phase C call site is going_to_deep_sleep, where pre-paint
+    // and the foreground render path have both been quiesced via
+    // page_cache.stop() — wait, no: persist must happen BEFORE
+    // stop, so pre-paint is still alive. The right pattern for
+    // Phase C is "enumerate → for each entry, fwrite under the
+    // SAME held cache-mutex" — i.e. the caller takes the mutex
+    // explicitly via a wrapper API, or this method takes a callback
+    // and holds cache_mutex_ across the callback. To be designed
+    // when Phase C lands; today this returns valid pointers under
+    // an immediately-released mutex, which is a footgun the doc
+    // here is explicitly calling out.
     size_t enumerate_complete(CompleteEntry * out, size_t max);
 
     // Whether start() succeeded. Used by BookController to short-
