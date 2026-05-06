@@ -7,6 +7,7 @@
 
 #include "screen.hpp"
 #include "logging.hpp"
+#include "esp.hpp"
 #include "models/page_cache.hpp"
 
 #include <cstdio>
@@ -27,6 +28,7 @@ WakeSnapshot::WakeSnapshot()
   : fb_cache_(nullptr),
     fb_cache_size_(0),
     captured_(false),
+    last_capture_ms_(0),
     cached_header_{},
     cached_primary_meta_{}
 {
@@ -50,6 +52,33 @@ WakeSnapshot::capture(uint32_t book_id,
   if ((fb == nullptr) || (sz == 0)) return false;
 
   std::scoped_lock guard(mutex_);
+
+  // Throttle. capture() costs a 256 KB PSRAM memcpy + a CRC over
+  // the same buffer; on a fast forward sweep BookController::show_
+  // and_capture would call us once per page paint, burning ~10-15
+  // ms of bandwidth that the user doesn't notice individually but
+  // adds up to lost responsiveness during multi-page swipes.
+  //
+  // Skipping is safe for sleep persistence: fb_cache_ already
+  // holds a recent prior page, persisted as the primary entry on
+  // the next deep-sleep entry. The user's typical sleep flow is
+  // "land on a page, pause to read for several seconds, open menu,
+  // tap Power Off" — which gives the throttle plenty of idle time
+  // to let a fresh capture through before sleep fires. PageCache
+  // entries persisted alongside cover the neighborhood anyway.
+  // ESP::millis() is uint32_t wall-clock-from-boot — wraps at
+  // ~49.7 days. The unsigned subtraction is overflow-safe (modular
+  // arithmetic), but on the wrap boundary the delta computes as a
+  // large value rather than the true ~zero, which would let a
+  // capture through despite the throttle saying "old enough." That
+  // false negative is harmless — at worst we do one extra capture
+  // every ~49 days. The reverse case (false positive blocking a
+  // legitimate capture) is impossible because a small delta on
+  // either side of wrap stays small under modular arithmetic.
+  uint32_t now_ms = (uint32_t) ESP::millis();
+  if (captured_ && ((now_ms - last_capture_ms_) < MIN_CAPTURE_INTERVAL_MS)) {
+    return false;
+  }
 
   if ((fb_cache_ == nullptr) || (fb_cache_size_ != sz)) {
     if (fb_cache_ != nullptr) {
@@ -110,7 +139,8 @@ WakeSnapshot::capture(uint32_t book_id,
   cached_primary_meta_.page_offset   = page_id.offset;
   cached_primary_meta_.fb_crc        = crc32(fb_cache_, sz);
 
-  captured_ = true;
+  captured_        = true;
+  last_capture_ms_ = now_ms;
   return true;
 }
 
@@ -495,6 +525,12 @@ WakeSnapshot::invalidate()
 {
   std::scoped_lock guard(mutex_);
   captured_            = false;
+  // Symmetric reset: keeps "freshly invalidated" indistinguishable
+  // from "freshly constructed" so the throttle gate doesn't carry
+  // stale timestamp state across an invalidate. Defense-in-depth
+  // against a future change that drops the captured_ guard on the
+  // throttle check.
+  last_capture_ms_     = 0;
   cached_header_       = {};
   cached_primary_meta_ = {};
   if (remove(SNAPSHOT_PATH) == 0) {

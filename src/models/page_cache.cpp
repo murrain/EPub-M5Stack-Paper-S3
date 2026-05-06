@@ -169,13 +169,28 @@ PageCache::start()
 
   // Match the retriever pattern: PSRAM-backed pthread stack so the
   // 32 KB doesn't eat into DMA-capable internal SRAM. Pinned to
-  // core 0 (LCD DMA runs on core 1 unaffected). Priority one below
-  // the retriever so layout work it depends on can preempt it.
+  // core 0 (LCD DMA runs on core 1 unaffected). Priority MATCHED
+  // with the retriever (configMAX_PRIORITIES-2) — they share the
+  // priority slot rather than pre-paint sitting one below.
+  //
+  // Rationale: in steady-state reading the retriever is idle in
+  // QUEUE_RECEIVE (page_locs is fully computed for the open book),
+  // so it can't actually compete for CPU. Promoting pre-paint to
+  // the retriever's slot lets pre-paint preempt any other lower-
+  // priority work (idle hooks, telemetry, etc.) and keep up with
+  // a fast user sweep — especially important now that the cache-
+  // hit display path runs without book_viewer.get_mutex and
+  // pre-paint can run concurrently with the panel waveform
+  // commit.
+  //
+  // During the brief retriever-active window (book first opens or
+  // format-edit recompute), they share core 0 timeslices fairly,
+  // and the user is on the splash screen anyway.
   auto cfg = esp_pthread_get_default_config();
   cfg.thread_name      = "prepaintTask";
   cfg.pin_to_core      = 0;
   cfg.stack_size       = 32 * 1024;
-  cfg.prio             = configMAX_PRIORITIES - 3;
+  cfg.prio             = configMAX_PRIORITIES - 2;
   cfg.inherit_cfg      = true;
   cfg.stack_alloc_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
   esp_pthread_set_cfg(&cfg);
