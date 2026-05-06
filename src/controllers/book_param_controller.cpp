@@ -9,7 +9,6 @@
 #include "controllers/common_actions.hpp"
 #include "controllers/books_dir_controller.hpp"
 #include "controllers/book_controller.hpp"
-#include "controllers/gestures.hpp"
 #include "models/books_dir.hpp"
 #include "models/epub.hpp"
 #include "models/config.hpp"
@@ -270,26 +269,24 @@ BookParamController::leave(bool going_to_deep_sleep)
 
 }
 
-void 
-BookParamController::input_event(const EventMgr::Event & event)
+bool
+BookParamController::has_active_sub_state() const
 {
-  // SWIPE_UP from anywhere on the screen dismisses the menu —
-  // mirror of the SWIPE_DOWN-from-top "drawer pull" gesture that
-  // brought it up. Only when the top-level menu is up: any
-  // sub-state with its own dismiss/key handshake (params edit,
-  // page-number nav, delete confirm, post-wifi restart prompt)
-  // must be allowed to complete. New sub-states added later need
-  // to be added here too.
-  if (Gestures::is_menu_dismiss(event) &&
-      !book_params_form_is_shown &&
-      !page_nav_is_shown &&
-      !wait_for_key_after_wifi &&
-      !delete_current_book) {
-    menu_viewer.clear_highlight();
-    app_controller.set_controller(AppController::Ctrl::LAST);
-    return;
-  }
+  // Each flag corresponds to a sub-form / sub-state with its own
+  // cancel/OK or key-press handshake. New flags belong here AND
+  // in dispatch_to_sub_state below — keep the two methods in sync.
+  // wait_for_key_after_wifi is unguarded because the flag is
+  // declared unconditionally; it just stays false in non-Inkplate
+  // builds (the only setter is inside an EPUB_INKPLATE_BUILD path).
+  return book_params_form_is_shown
+      || page_nav_is_shown
+      || delete_current_book
+      || wait_for_key_after_wifi;
+}
 
+void
+BookParamController::dispatch_to_sub_state(const EventMgr::Event & event)
+{
   if (book_params_form_is_shown) {
     if (form_viewer.event(event)) {
       book_params_form_is_shown = false;
@@ -300,7 +297,7 @@ BookParamController::input_event(const EventMgr::Event & event)
         if (font_size         !=         old_font_size) book_params->put(BookParams::Ident::FONT_SIZE,          font_size        );
         if (font              !=              old_font) book_params->put(BookParams::Ident::FONT,               font             );
         if (use_fonts_in_book != old_use_fonts_in_book) book_params->put(BookParams::Ident::USE_FONTS_IN_BOOK,  use_fonts_in_book);
-        
+
         if (book_params->is_modified()) {
           page_locs.stop_document();
           epub.update_book_format_params();
@@ -324,7 +321,7 @@ BookParamController::input_event(const EventMgr::Event & event)
             fonts.clear_glyph_caches();
           }
         }
- 
+
         if (old_font != font) {
           fonts.adjust_default_font(font);
         }
@@ -402,7 +399,7 @@ BookParamController::input_event(const EventMgr::Event & event)
         }
       }
       else {
-        msg_viewer.show(MsgViewer::MsgType::INFO, false, false, 
+        msg_viewer.show(MsgViewer::MsgType::INFO, false, false,
                         "Canceled", "The e-book was not deleted.");
       }
       delete_current_book = false;
@@ -410,18 +407,13 @@ BookParamController::input_event(const EventMgr::Event & event)
   }
   #if EPUB_INKPLATE_BUILD
     else if (wait_for_key_after_wifi) {
-      msg_viewer.show(MsgViewer::MsgType::INFO, 
-                      false, true, 
-                      "Restarting", 
+      msg_viewer.show(MsgViewer::MsgType::INFO,
+                      false, true,
+                      "Restarting",
                       "The device is now restarting. Please wait.");
       wait_for_key_after_wifi = false;
       stop_web_server();
       esp_restart();
     }
   #endif
-  else {
-    if (menu_viewer.event(event)) {
-      app_controller.set_controller(AppController::Ctrl::LAST);
-    }
-  }
 }

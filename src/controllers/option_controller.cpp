@@ -8,7 +8,6 @@
 #include "controllers/common_actions.hpp"
 #include "controllers/app_controller.hpp"
 #include "controllers/books_dir_controller.hpp"
-#include "controllers/gestures.hpp"
 #include "controllers/ntp.hpp"
 #include "controllers/clock.hpp"
 #include "viewers/menu_viewer.hpp"
@@ -469,40 +468,45 @@ OptionController::leave(bool going_to_deep_sleep)
 {
 }
 
-void
-OptionController::input_event(const EventMgr::Event & event)
+bool
+OptionController::has_active_sub_state() const
 {
-  // SWIPE_UP from anywhere on the screen dismisses the menu —
-  // mirror of the SWIPE_DOWN-from-top "drawer pull" gesture
-  // that brought it up. Only when the top-level menu is up: any
-  // sub-state with its own dismiss/key handshake (main params
-  // form, font params, date/time form, calibration overlay,
-  // post-wifi restart, post-usb restart) must be allowed to
-  // complete. New sub-states added later need to be added here
-  // too. The books_refresh_needed semantics from the menu_viewer
-  // dismiss path are preserved: a refresh queued from the menu
-  // still fires when the user swipes up to dismiss.
-  if (Gestures::is_menu_dismiss(event) &&
-      !main_form_is_shown &&
-      !font_form_is_shown &&
+  // Each flag corresponds to a sub-form / sub-state with its own
+  // cancel/OK or key-press handshake. New flags belong here AND
+  // in dispatch_to_sub_state below — keep the two methods in sync.
+  // The two wait-for-key flags are declared unconditionally so
+  // they're safe to read here; date_time_form_is_shown and
+  // calibration_is_shown are conditionally declared (matching
+  // the sub-form availability) and need the same guards.
+  return main_form_is_shown
+      || font_form_is_shown
       #if DATE_TIME_RTC
-        !date_time_form_is_shown &&
+        || date_time_form_is_shown
       #endif
       #if INKPLATE_6PLUS
-        !calibration_is_shown &&
+        || calibration_is_shown
       #endif
-      !wait_for_key_after_wifi &&
-      !wait_for_key_after_usb) {
-    menu_viewer.clear_highlight();
-    if (books_refresh_needed) {
-      books_refresh_needed = false;
-      int16_t dummy;
-      books_dir.refresh(nullptr, dummy, true);
-    }
-    app_controller.set_controller(AppController::Ctrl::LAST);
-    return;
-  }
+      || wait_for_key_after_wifi
+      || wait_for_key_after_usb;
+}
 
+void
+OptionController::on_before_dismiss()
+{
+  // When the user dismisses the menu (via SWIPE_UP or via the
+  // menu_viewer signaling done), a refresh queued from the menu
+  // (e.g., the "Refresh the e-books list" entry) still needs to
+  // fire before control returns to the books-dir screen.
+  if (books_refresh_needed) {
+    books_refresh_needed = false;
+    int16_t dummy;
+    books_dir.refresh(nullptr, dummy, true);
+  }
+}
+
+void
+OptionController::dispatch_to_sub_state(const EventMgr::Event & event)
+{
   if (main_form_is_shown) {
     if (form_viewer.event(event)) {
       main_form_is_shown = false;
@@ -534,7 +538,7 @@ OptionController::input_event(const EventMgr::Event & event)
         if (old_dir_view != dir_view) {
           books_dir_controller.set_current_book_index(-1);
         }
-        
+
         #if !defined(BOARD_TYPE_PAPER_S3)
           if (old_resolution != resolution) {
             fonts.clear_glyph_caches();
@@ -549,7 +553,7 @@ OptionController::input_event(const EventMgr::Event & event)
         }
 
         #if !defined(BOARD_TYPE_PAPER_S3)
-          if ((old_orientation != orientation) || 
+          if ((old_orientation != orientation) ||
               (old_resolution  != resolution )) {
         #else
           if (old_orientation != orientation) {
@@ -639,22 +643,11 @@ OptionController::input_event(const EventMgr::Event & event)
   #endif
 
   #if INKPLATE_6PLUS
-  else if (calibration_is_shown) {
-    if (event_mgr.calibration_event(event)) {
-      calibration_is_shown = false;
-      menu_viewer.show(menu, 0, true);
-    }
-  }
-  #endif
-  
-  else {
-    if (menu_viewer.event(event)) {
-      if (books_refresh_needed) {
-        books_refresh_needed = false;
-        int16_t dummy;
-        books_dir.refresh(nullptr, dummy, true);
+    else if (calibration_is_shown) {
+      if (event_mgr.calibration_event(event)) {
+        calibration_is_shown = false;
+        menu_viewer.show(menu, 0, true);
       }
-      app_controller.set_controller(AppController::Ctrl::LAST);
     }
-  }
+  #endif
 }

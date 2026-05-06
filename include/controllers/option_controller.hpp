@@ -6,8 +6,9 @@
 #include "global.hpp"
 
 #include "controllers/event_mgr.hpp"
+#include "controllers/menu_controller_base.hpp"
 
-class OptionController
+class OptionController : public MenuControllerBase
 {
   private:
     static constexpr char const * TAG = "OptionController";
@@ -44,12 +45,11 @@ class OptionController
                          #endif
                          wait_for_key_after_wifi(false),
                          wait_for_key_after_usb(false) { };
-                         
-    void    input_event(const EventMgr::Event & event);
+
     void          enter();
     void          leave(bool going_to_deep_sleep = false);
     void set_font_count(uint8_t count);
-     
+
     inline void        set_main_form_is_shown() { main_form_is_shown      = true; }
     inline void        set_font_form_is_shown() { font_form_is_shown      = true; }
 
@@ -84,6 +84,11 @@ class OptionController
         calibration_is_shown    = false;
       #endif
     }
+
+  protected:
+    bool has_active_sub_state() const override;
+    void dispatch_to_sub_state(const EventMgr::Event & event) override;
+    void on_before_dismiss() override;
 };
 
 #if __OPTION_CONTROLLER__

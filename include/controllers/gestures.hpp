@@ -52,6 +52,17 @@ namespace Gestures {
       return e.kind == EventMgr::EventKind::SWIPE_UP;
     }
 
+  #else
+
+    // Button-only builds (inkplate_6, inkplate_10): the SWIPE_*
+    // gesture kinds aren't part of EventKind, and menu open/
+    // dismiss happens through physical buttons that the viewer
+    // (menu_viewer.event) interprets directly. The predicates
+    // exist as always-false stubs so caller code stays build-
+    // portable — the compiler folds the dead branch away.
+    inline bool is_menu_open(const EventMgr::Event &) { return false; }
+    inline bool is_menu_dismiss(const EventMgr::Event &) { return false; }
+
   #endif
 
 }
