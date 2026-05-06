@@ -55,6 +55,7 @@ struct RetrieveQueueData {
   #define QUEUE_RECEIVE(q, m, t)  mq_receive(q,       (char *) &m, sizeof(m), nullptr)
 #else
   #include <esp_pthread.h>
+  #include <esp_heap_caps.h>
   #include <freertos/FreeRTOS.h>
   #include <freertos/task.h>
 
@@ -65,6 +66,20 @@ struct RetrieveQueueData {
       cfg.pin_to_core = core_id;
       cfg.stack_size = stack;
       cfg.prio = prio;
+      // Place these large pthread stacks in PSRAM. retrieverTask
+      // (60 KB) and stateTask (10 KB) together would otherwise consume
+      // ~70 KB of MALLOC_CAP_INTERNAL/MALLOC_CAP_DMA, leaving SD-SPI
+      // bounce-buffer allocations (sdmmc_read_sectors) without enough
+      // contiguous DMA memory at PageLocs::load time and aborting via
+      // an unallocatable ios::failure throw. Neither thread passes
+      // stack-resident buffers to a DMA peripheral; their work is XML
+      // parsing, page formatting and PSRAM framebuffer writes — all
+      // CPU-mediated — so the PSRAM access penalty is negligible
+      // compared to the SD/iostream costs they're already bound by.
+      // Requires CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y, present
+      // in sdkconfig.paper_s3. MALLOC_CAP_8BIT is mandated by
+      // esp_pthread_set_cfg.
+      cfg.stack_alloc_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
       return cfg;
   }
 
