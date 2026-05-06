@@ -27,6 +27,7 @@ extern "C" {
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <sstream>
+#include <cassert>
 
 #if 0
   const uint32_t CRC32_INITIAL    = 0xFFFFFFFFUL;
@@ -754,6 +755,18 @@ static esp_pthread_cfg_t make_refresh_thread_config()
 bool
 BooksDir::start_async_refresh(bool force_init)
 {
+  // Precondition: no book may be open. The worker calls
+  // refresh()'s per-book loop which itself opens / closes EPUBs
+  // via the epub singleton; if a session was still live, the
+  // worker would clobber its state. epub being closed is a
+  // downstream marker that the upstream subsystems are also
+  // quiesced — BooksDirController::enter does the cascade
+  // (page_cache.stop → page_locs.stop_document → epub.close_-
+  // file), so by the time we reach a Refresh-icon tap from the
+  // persistent strip, all three are idle. Catch anyone who
+  // calls start_async_refresh from a state that violates this.
+  assert(!epub.is_file_open());
+
   if (async_refresh_active_.load()) {
     LOG_W("start_async_refresh: already in progress, ignoring");
     return false;

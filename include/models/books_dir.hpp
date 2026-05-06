@@ -74,6 +74,20 @@ class BooksDir
     // The result and the thread handle are only accessed by the
     // caller (in main task) AFTER atomic_done has been observed
     // true, so no protection is needed beyond the publish.
+    //
+    // Single-producer assumption: only one task (the main app
+    // task) ever calls start_async_refresh / poll_async_refresh.
+    // The active_ flag's load-then-store sequence inside
+    // start_async_refresh is therefore race-free as written. If
+    // a future call site adds a second producer, that call must
+    // serialize externally — atomic_compare_exchange on active_
+    // would be the upgrade.
+    //
+    // done_ is sticky after a refresh completes (stays true
+    // until the next start_async_refresh resets it). Subsequent
+    // poll calls return true without doing anything; the join
+    // is a no-op because the thread handle has already been
+    // joined and is non-joinable.
     std::thread       async_refresh_thread_;
     std::atomic<bool> async_refresh_active_{false};
     std::atomic<bool> async_refresh_done_{false};
@@ -99,8 +113,18 @@ class BooksDir
   public:
     BooksDir() : current_book_idx(-1) { }
    ~BooksDir() {
+      // Join any in-flight async refresh BEFORE touching the db.
+      // The worker pthread may still be inside refresh() reading
+      // / writing the db; abandoning the thread (joinable on
+      // destruction) would call std::terminate, and tearing down
+      // the db while the worker dereferences it would UAF. On a
+      // clean shutdown poll_async_refresh has already joined and
+      // this is a no-op; on abnormal termination (esp_restart
+      // mid-scan, ISR-triggered reset, etc.) it's the last
+      // chance to bring the worker home cleanly.
+      if (async_refresh_thread_.joinable()) async_refresh_thread_.join();
       sorted_index.clear();
-      close_db(); 
+      close_db();
     }
 
     /**
