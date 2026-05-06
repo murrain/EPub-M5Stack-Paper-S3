@@ -8,6 +8,7 @@
 #include "controllers/common_actions.hpp"
 #include "controllers/app_controller.hpp"
 #include "controllers/books_dir_controller.hpp"
+#include "controllers/gestures.hpp"
 #include "controllers/ntp.hpp"
 #include "controllers/clock.hpp"
 #include "viewers/menu_viewer.hpp"
@@ -468,9 +469,40 @@ OptionController::leave(bool going_to_deep_sleep)
 {
 }
 
-void 
+void
 OptionController::input_event(const EventMgr::Event & event)
 {
+  // SWIPE_UP from anywhere on the screen dismisses the menu —
+  // mirror of the SWIPE_DOWN-from-top "drawer pull" gesture
+  // that brought it up. Only when the top-level menu is up: any
+  // sub-state with its own dismiss/key handshake (main params
+  // form, font params, date/time form, calibration overlay,
+  // post-wifi restart, post-usb restart) must be allowed to
+  // complete. New sub-states added later need to be added here
+  // too. The books_refresh_needed semantics from the menu_viewer
+  // dismiss path are preserved: a refresh queued from the menu
+  // still fires when the user swipes up to dismiss.
+  if (Gestures::is_menu_dismiss(event) &&
+      !main_form_is_shown &&
+      !font_form_is_shown &&
+      #if DATE_TIME_RTC
+        !date_time_form_is_shown &&
+      #endif
+      #if INKPLATE_6PLUS
+        !calibration_is_shown &&
+      #endif
+      !wait_for_key_after_wifi &&
+      !wait_for_key_after_usb) {
+    menu_viewer.clear_highlight();
+    if (books_refresh_needed) {
+      books_refresh_needed = false;
+      int16_t dummy;
+      books_dir.refresh(nullptr, dummy, true);
+    }
+    app_controller.set_controller(AppController::Ctrl::LAST);
+    return;
+  }
+
   if (main_form_is_shown) {
     if (form_viewer.event(event)) {
       main_form_is_shown = false;

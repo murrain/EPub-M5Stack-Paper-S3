@@ -9,6 +9,7 @@
 #include "controllers/common_actions.hpp"
 #include "controllers/books_dir_controller.hpp"
 #include "controllers/book_controller.hpp"
+#include "controllers/gestures.hpp"
 #include "models/books_dir.hpp"
 #include "models/epub.hpp"
 #include "models/config.hpp"
@@ -279,7 +280,7 @@ BookParamController::input_event(const EventMgr::Event & event)
   // page-number nav, delete confirm, post-wifi restart prompt)
   // must be allowed to complete. New sub-states added later need
   // to be added here too.
-  if ((event.kind == EventMgr::EventKind::SWIPE_UP) &&
+  if (Gestures::is_menu_dismiss(event) &&
       !book_params_form_is_shown &&
       !page_nav_is_shown &&
       !wait_for_key_after_wifi &&

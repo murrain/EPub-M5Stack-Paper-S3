@@ -7,6 +7,7 @@
 
 #include "controllers/app_controller.hpp"
 #include "controllers/books_dir_controller.hpp"
+#include "controllers/gestures.hpp"
 #include "models/books_dir.hpp"
 #include "models/epub.hpp"
 #include "models/page_cache.hpp"
@@ -40,14 +41,6 @@ namespace
   // to live render.
   constexpr int RESIDENCY_AHEAD  = 4;
   constexpr int RESIDENCY_BEHIND = 1;
-
-  // Top-edge gesture target for both TAP and SWIPE_DOWN. Defined
-  // once at file scope so the menu's hit region can't drift between
-  // the two handlers from a one-sided tuning change. ~10% of the
-  // 960 px portrait panel — large enough to hit reliably with a
-  // thumb, small enough to leave the rest of the page for content
-  // taps + swipes.
-  constexpr uint16_t TOP_EDGE_PX = 80;
 
   // Compute the current ± N residency set. Caller (show_and_capture)
   // forwards to page_cache.request_residency. Skips entries when
@@ -341,9 +334,16 @@ BookController::open_book_file(
 }
 
 #if INKPLATE_6PLUS || TOUCH_TRIAL
-  void 
+  void
   BookController::input_event(const EventMgr::Event & event)
   {
+    // Top-edge gesture opens the menu (TAP-at-top OR SWIPE_DOWN-
+    // from-top). Centralized predicate; see gestures.hpp.
+    if (Gestures::is_menu_open(event)) {
+      app_controller.set_controller(AppController::Ctrl::PARAM);
+      return;
+    }
+
     const PageLocs::PageId * page_id;
     switch (event.kind) {
       case EventMgr::EventKind::SWIPE_RIGHT:
@@ -385,52 +385,27 @@ BookController::open_book_file(
         break;
       
       case EventMgr::EventKind::TAP:
-        // New touch grammar (user request):
-        //   y < TOP_EDGE_PX             → menu (PARAM controller)
-        //   y ≥ TOP_EDGE_PX, x < width/3 → previous page
-        //   y ≥ TOP_EDGE_PX, x > 2/3 w   → next page
-        //   y ≥ TOP_EDGE_PX, center 1/3  → dead space (no-op)
-        //
-        // Removes the previous "tap anywhere → menu" path that
-        // accidentally triggered the menu when the user wanted to
-        // tap-advance a page in the center column. TOP_EDGE_PX is
-        // a file-scope constant shared with the SWIPE_DOWN handler
-        // below.
-        {
-          if (event.y < TOP_EDGE_PX) {
-            app_controller.set_controller(AppController::Ctrl::PARAM);
+        // Top-edge taps were already handled by is_menu_open above.
+        // Page navigation columns:
+        //   x < width/3     → previous page
+        //   x > 2/3 width   → next page
+        //   center third    → dead space (no-op, prevents
+        //                     accidental menu when reading)
+        if (event.x < (Screen::get_width() / 3)) {
+          page_id = page_locs.get_prev_page_id(current_page_id);
+          if (page_id != nullptr) {
+            current_page_id.itemref_index = page_id->itemref_index;
+            current_page_id.offset        = page_id->offset;
+            show_and_capture(current_page_id);
           }
-          else if (event.x < (Screen::get_width() / 3)) {
-            page_id = page_locs.get_prev_page_id(current_page_id);
-            if (page_id != nullptr) {
-              current_page_id.itemref_index = page_id->itemref_index;
-              current_page_id.offset        = page_id->offset;
-              show_and_capture(current_page_id);
-            }
-          }
-          else if (event.x > ((Screen::get_width() / 3) * 2)) {
-            page_id = page_locs.get_next_page_id(current_page_id);
-            if (page_id != nullptr) {
-              current_page_id.itemref_index = page_id->itemref_index;
-              current_page_id.offset        = page_id->offset;
-              show_and_capture(current_page_id);
-            }
-          }
-          // else: center third / bottom region → intentional no-op.
         }
-        break;
-
-      case EventMgr::EventKind::SWIPE_DOWN:
-        // Pull-down-from-top "drawer" gesture for the menu.
-        // Filtered by start-y so a vertical drag in the middle of
-        // the page (which is unusual but possible on accidental
-        // contact) doesn't trigger the menu. event.y is the touch
-        // start position — see event_mgr_paper_s3.cpp where the
-        // FSM stores start_x / start_y on first contact. Same
-        // TOP_EDGE_PX as the TAP handler above so the menu's hit
-        // region is consistent across gestures.
-        if (event.y < TOP_EDGE_PX) {
-          app_controller.set_controller(AppController::Ctrl::PARAM);
+        else if (event.x > ((Screen::get_width() / 3) * 2)) {
+          page_id = page_locs.get_next_page_id(current_page_id);
+          if (page_id != nullptr) {
+            current_page_id.itemref_index = page_id->itemref_index;
+            current_page_id.offset        = page_id->offset;
+            show_and_capture(current_page_id);
+          }
         }
         break;
 

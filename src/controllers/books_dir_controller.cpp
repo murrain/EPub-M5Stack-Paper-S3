@@ -7,6 +7,7 @@
 
 #include "controllers/app_controller.hpp"
 #include "controllers/book_controller.hpp"
+#include "controllers/gestures.hpp"
 #include "models/books_dir.hpp"
 #include "models/config.hpp"
 #include "models/epub.hpp"
@@ -295,7 +296,7 @@ BooksDirController::leave(bool going_to_deep_sleep)
 }
 
 #if INKPLATE_6PLUS || TOUCH_TRIAL
-  void 
+  void
   BooksDirController::input_event(const EventMgr::Event & event)
   {
     static std::string book_fname;
@@ -303,13 +304,24 @@ BooksDirController::leave(bool going_to_deep_sleep)
 
     const BooksDir::EBookRecord * book;
 
+    // Top-edge gesture opens the books-dir menu (TAP-at-top OR
+    // SWIPE_DOWN-from-top). Centralized predicate; see gestures.hpp.
+    // Must run before TAP dispatch — a tap at the top edge is
+    // unambiguously a menu open, not a (potentially failed) book
+    // selection.
+    if (Gestures::is_menu_open(event)) {
+      current_book_index = -1;
+      app_controller.set_controller(AppController::Ctrl::OPTION);
+      return;
+    }
+
     switch (event.kind) {
       case EventMgr::EventKind::SWIPE_RIGHT:
-        current_book_index = books_dir_viewer->prev_page();   
+        current_book_index = books_dir_viewer->prev_page();
         break;
 
       case EventMgr::EventKind::SWIPE_LEFT:
-        current_book_index = books_dir_viewer->next_page();   
+        current_book_index = books_dir_viewer->next_page();
         break;
 
       case EventMgr::EventKind::TAP:
@@ -323,7 +335,7 @@ BooksDirController::leave(bool going_to_deep_sleep)
               book_fname   += book->filename;
               book_title    = book->title;
               book_filename = book->filename;
-              
+
               PageLocs::PageId page_id = { 0, 0 };
 
               #if EPUB_INKPLATE_BUILD
@@ -332,7 +344,7 @@ BooksDirController::leave(bool going_to_deep_sleep)
                   page_id = { nvs_data.itemref_index, nvs_data.offset };
                 }
               #endif
-              
+
               if (book_controller.open_book_file(book_title, book_fname, page_id)) {
                 app_controller.set_controller(AppController::Ctrl::BOOK);
               }
