@@ -115,9 +115,20 @@ class WakeSnapshot
     // PSRAM bandwidth). Caller passes the metadata that identifies
     // what's on screen — we don't try to reverse-engineer it from
     // BookController state to keep the dependency one-way.
+    //
+    // Throttled: rapid successive calls (within MIN_CAPTURE_INTERVAL_
+    // MS of the previous successful capture) are skipped to avoid
+    // burning ~10 ms of PSRAM bandwidth per page during fast user
+    // sweeps. The skipped capture is harmless for sleep persistence
+    // because (a) the fb_cache_ already holds a recent prior page
+    // and (b) the user typically pauses on a final page for >> the
+    // throttle window before sleeping, allowing the next capture
+    // through. Returns false on skip, true on actual capture.
     bool capture(uint32_t book_id,
                  const PageLocs::PageId & page_id,
                  uint32_t format_hash);
+
+    static constexpr uint32_t MIN_CAPTURE_INTERVAL_MS = 1000;
 
     // True iff capture() has populated the cache since boot.
     inline bool has_pending_capture() const { return captured_; }
@@ -213,6 +224,7 @@ class WakeSnapshot
     uint8_t *      fb_cache_;
     size_t         fb_cache_size_;
     bool           captured_;
+    uint32_t       last_capture_ms_;  ///< throttle bookkeeping
     // v2 split: shared header fields stay in cached_header_; the
     // per-page metadata (itemref/offset/CRC) for the primary page
     // moves to cached_primary_meta_. persist() writes

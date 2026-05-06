@@ -7,6 +7,7 @@
 
 #include "screen.hpp"
 #include "logging.hpp"
+#include "esp.hpp"
 #include "models/page_cache.hpp"
 
 #include <cstdio>
@@ -27,6 +28,7 @@ WakeSnapshot::WakeSnapshot()
   : fb_cache_(nullptr),
     fb_cache_size_(0),
     captured_(false),
+    last_capture_ms_(0),
     cached_header_{},
     cached_primary_meta_{}
 {
@@ -50,6 +52,24 @@ WakeSnapshot::capture(uint32_t book_id,
   if ((fb == nullptr) || (sz == 0)) return false;
 
   std::scoped_lock guard(mutex_);
+
+  // Throttle. capture() costs a 256 KB PSRAM memcpy + a CRC over
+  // the same buffer; on a fast forward sweep BookController::show_
+  // and_capture would call us once per page paint, burning ~10-15
+  // ms of bandwidth that the user doesn't notice individually but
+  // adds up to lost responsiveness during multi-page swipes.
+  //
+  // Skipping is safe for sleep persistence: fb_cache_ already
+  // holds a recent prior page, persisted as the primary entry on
+  // the next deep-sleep entry. The user's typical sleep flow is
+  // "land on a page, pause to read for several seconds, open menu,
+  // tap Power Off" — which gives the throttle plenty of idle time
+  // to let a fresh capture through before sleep fires. PageCache
+  // entries persisted alongside cover the neighborhood anyway.
+  uint32_t now_ms = (uint32_t) ESP::millis();
+  if (captured_ && ((now_ms - last_capture_ms_) < MIN_CAPTURE_INTERVAL_MS)) {
+    return false;
+  }
 
   if ((fb_cache_ == nullptr) || (fb_cache_size_ != sz)) {
     if (fb_cache_ != nullptr) {
@@ -110,7 +130,8 @@ WakeSnapshot::capture(uint32_t book_id,
   cached_primary_meta_.page_offset   = page_id.offset;
   cached_primary_meta_.fb_crc        = crc32(fb_cache_, sz);
 
-  captured_ = true;
+  captured_        = true;
+  last_capture_ms_ = now_ms;
   return true;
 }
 
