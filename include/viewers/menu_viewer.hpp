@@ -6,6 +6,7 @@
 #include "global.hpp"
 
 #include "controllers/event_mgr.hpp"
+#include "screen.hpp"
 
 class MenuViewer
 {
@@ -71,6 +72,18 @@ class MenuViewer
       Dim dim;
     } entry_locs[MAX_MENU_ENTRY];
     MenuEntry * menu;
+
+    // Render-and-commit helper used by every paint site in the
+    // menu (initial show, highlight changes, tap-and-hold hint).
+    // Centralizes the partial-paint contract: emit display list
+    // to the panel framebuffer, commit ONLY the menu's top strip
+    // via Screen::update_region. Book content below the strip
+    // stays put on display. On Inkplate / Linux update_region
+    // forwards to full update() so the cross-platform path still
+    // produces a panel commit.
+    void commit_region(Screen::UpdateMode mode,
+                       bool clear_screen = false,
+                       bool do_it        = false);
 };
 
 #if __MENU_VIEWER__

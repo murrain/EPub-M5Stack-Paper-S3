@@ -90,6 +90,24 @@ class Screen : NonCopyable
     // eliminate residual ghosting from the previous book page.
     void panel_clear();
 
+    // Drive ONLY a rectangular region of the panel through the
+    // requested waveform. Same UpdateMode semantics as update(),
+    // but the on-panel commit is bounded to (pos, dim) in logical
+    // (post-rotation) coordinates — the rest of the panel image
+    // is left untouched on display.
+    //
+    // Used by viewers that paint to a known sub-region (menu_
+    // viewer's top strip, msg_viewer overlays) so the user doesn't
+    // see the entire panel flicker through GC16 when only ~10% of
+    // the pixels actually changed.
+    //
+    // Falls back to full-screen update() when s_force_full or
+    // s_warm_wake_clear_pending is armed, since those flags imply
+    // a transactional full clear of the panel that a partial
+    // commit can't honor. Caller doesn't need to worry about that
+    // — just call update_region and trust the flag interaction.
+    void update_region(Pos pos, Dim dim, UpdateMode mode);
+
     // Raw panel-framebuffer accessors. The buffer is 4-bit packed
     // grayscale at the panel's physical landscape dimensions
     // (960x540 on PaperS3), regardless of the logical orientation
@@ -270,6 +288,15 @@ class Screen : NonCopyable
     inline Orientation get_orientation() { return orientation; }
     inline PixelResolution get_pixel_resolution() { return pixel_resolution; }
     inline void force_full_update() { partial_count = 0; }
+
+    // No partial-region API on Inkplate (the FrameBuffer1Bit/3Bit
+    // path doesn't expose epdiy's update_area equivalent). Forward
+    // to full update() so cross-platform consumers (menu_viewer)
+    // still get a panel commit on these boards — they just don't
+    // benefit from the partial-flicker savings PaperS3 provides.
+    inline void update_region(Pos /*pos*/, Dim /*dim*/, UpdateMode mode) {
+      update(mode);
+    }
 
     // Inkplate boards have no equivalent fast-wake story (no PMU
     // power-cut), so the WakeSnapshot module no-ops by returning

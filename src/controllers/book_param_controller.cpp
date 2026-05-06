@@ -272,6 +272,23 @@ BookParamController::leave(bool going_to_deep_sleep)
 void 
 BookParamController::input_event(const EventMgr::Event & event)
 {
+  // SWIPE_UP from anywhere on the screen dismisses the menu —
+  // mirror of the SWIPE_DOWN-from-top "drawer pull" gesture that
+  // brought it up. Only when the top-level menu is up: any
+  // sub-state with its own dismiss/key handshake (params edit,
+  // page-number nav, delete confirm, post-wifi restart prompt)
+  // must be allowed to complete. New sub-states added later need
+  // to be added here too.
+  if ((event.kind == EventMgr::EventKind::SWIPE_UP) &&
+      !book_params_form_is_shown &&
+      !page_nav_is_shown &&
+      !wait_for_key_after_wifi &&
+      !delete_current_book) {
+    menu_viewer.clear_highlight();
+    app_controller.set_controller(AppController::Ctrl::LAST);
+    return;
+  }
+
   if (book_params_form_is_shown) {
     if (form_viewer.event(event)) {
       book_params_form_is_shown = false;
