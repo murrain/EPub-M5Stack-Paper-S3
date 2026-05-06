@@ -14,6 +14,10 @@
 #if EPUB_INKPLATE_BUILD
   #include "models/nvs_mgr.hpp"
   #include "esp.hpp"
+  #include <esp_pthread.h>
+  #include <esp_heap_caps.h>
+  #include <freertos/FreeRTOS.h>
+  #include <freertos/task.h>
 #endif
 
 extern "C" { 
@@ -725,6 +729,73 @@ error_clear:
   if (dp) closedir(dp);
   if (the_book) free(the_book);
   return false;
+}
+
+#if EPUB_INKPLATE_BUILD
+// Worker-thread config for the async refresh path. Mirrors the
+// page_locs StateTask / RetrieverTask pattern: PSRAM stack so the
+// 32 KB allocation doesn't fight the SD-SPI bounce-buffer's need
+// for internal/DMA RAM, pinned to core 0 to keep panel-paint work
+// on core 1 unencumbered. Priority below the default app task so
+// TinyUSB and the panel-paint pthreads always preempt it.
+static esp_pthread_cfg_t make_refresh_thread_config()
+{
+  auto cfg = esp_pthread_get_default_config();
+  cfg.thread_name      = "booksDirRefresh";
+  cfg.pin_to_core      = 0;
+  cfg.stack_size       = 32 * 1024;  // generous for nested EPUB / image / CSS parsing
+  cfg.prio             = configMAX_PRIORITIES - 4;
+  cfg.inherit_cfg      = false;
+  cfg.stack_alloc_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+  return cfg;
+}
+#endif
+
+bool
+BooksDir::start_async_refresh(bool force_init)
+{
+  if (async_refresh_active_.load()) {
+    LOG_W("start_async_refresh: already in progress, ignoring");
+    return false;
+  }
+
+  // Reset the flags BEFORE spawning, so the worker can flip done_
+  // from a deterministic starting state. atomic store has release
+  // semantics — the worker's eventual load(acquire) on done_ will
+  // see this store-publish.
+  async_refresh_done_.store(false);
+  async_refresh_result_ = false;
+  async_refresh_active_.store(true);
+
+  #if EPUB_INKPLATE_BUILD
+    auto cfg = make_refresh_thread_config();
+    esp_pthread_set_cfg(&cfg);
+  #endif
+
+  async_refresh_thread_ = std::thread([this, force_init]() {
+    int16_t dummy_index;
+    bool ok = refresh(nullptr, dummy_index, force_init);
+    // Result publish: write result_ first, then done_. The atomic
+    // store(release) on done_ ensures the result_ write is visible
+    // to anyone observing done_ via load(acquire).
+    async_refresh_result_ = ok;
+    async_refresh_done_.store(true, std::memory_order_release);
+  });
+
+  return true;
+}
+
+bool
+BooksDir::poll_async_refresh()
+{
+  if (!async_refresh_done_.load(std::memory_order_acquire)) return false;
+  // Worker has finished. Join the thread so its resources are
+  // reclaimed (no detached leaks) and the next start_async_refresh
+  // can re-assign the thread handle. join() is fast here because
+  // the worker has already exited.
+  if (async_refresh_thread_.joinable()) async_refresh_thread_.join();
+  async_refresh_active_.store(false);
+  return true;
 }
 
 void
