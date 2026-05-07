@@ -898,39 +898,39 @@ EPub::open_file(const std::string & epub_filename)
   // either refactored into a state machine with explicit per-step
   // bounds, or we're confident no book in the wild can wedge any
   // of these phases.
-  LOG_I("open_file phase: page_locs.clear");
+  LOG_W("open_file phase: page_locs.clear");
   page_locs.clear();
 
   #if COMPUTE_SIZE
     memory_used = 0;
   #endif
 
-  LOG_I("open_file phase: unzip.open_zip_file");
+  LOG_W("open_file phase: unzip.open_zip_file");
   if (!unzip.open_zip_file(epub_filename.c_str())) {
     LOG_E("EPub open_file: Unable to open zip file: %s", epub_filename.c_str());
     return false;
   }
 
-  LOG_I("open_file phase: check_mimetype");
+  LOG_W("open_file phase: check_mimetype");
   if (!check_mimetype()) return false;
 
-  LOG_I("open_file phase: get_opf_filename");
+  LOG_W("open_file phase: get_opf_filename");
   std::string filename;
   if (!get_opf_filename(filename)) return false;
 
-  LOG_I("open_file phase: get_opf");
+  LOG_W("open_file phase: get_opf");
   if (!get_opf(filename)) {
     LOG_E("EPub open_file: Unable to get opf of %s", epub_filename.c_str());
     unzip.close_zip_file();
     return false;
   }
 
-  LOG_I("open_file phase: get_encryption_xml");
+  LOG_W("open_file phase: get_encryption_xml");
   get_encryption_xml();
 
-  LOG_I("open_file phase: open_params");
+  LOG_W("open_file phase: open_params");
   open_params(epub_filename);
-  LOG_I("open_file phase: update_book_format_params");
+  LOG_W("open_file phase: update_book_format_params");
   update_book_format_params();
 
   // No page_locs.stop_document() / page_cache.invalidate_all()
@@ -950,7 +950,7 @@ EPub::open_file(const std::string & epub_filename)
   // We log but don't fail the open: showing the user the book
   // with the wrong font is better UX than refusing to open it.
   // The PARS could be repaired by the user through the menu.
-  LOG_I("open_file phase: adjust_default_font (idx=%u)",
+  LOG_W("open_file phase: adjust_default_font (idx=%u)",
         (unsigned) book_format_params.font);
   if (!fonts.adjust_default_font(book_format_params.font)) {
     LOG_E("EPub::open: adjust_default_font(%u) failed; rendering with "
@@ -958,7 +958,7 @@ EPub::open_file(const std::string & epub_filename)
           (unsigned) book_format_params.font);
   }
 
-  LOG_I("open_file phase: clear_item_data");
+  LOG_W("open_file phase: clear_item_data");
   clear_item_data(current_item_info);
 
   current_filename     = epub_filename;
@@ -966,7 +966,7 @@ EPub::open_file(const std::string & epub_filename)
   fonts_size_too_large = false;
   fonts_size           = 0;
 
-  LOG_I("open_file phase: DONE");
+  LOG_W("open_file phase: DONE");
 
   return true;
 }

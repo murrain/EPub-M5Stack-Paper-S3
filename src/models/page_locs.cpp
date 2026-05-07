@@ -1052,16 +1052,16 @@ PageLocs::start_new_document(int16_t count, int16_t itemref_index)
   // EPub::open_file for the rationale: a Belgariade-class wedge in
   // the open path was opaque on the panel and we want the serial
   // wire to localize the stuck step in one boot cycle.
-  LOG_I("start_new_document: phase: stop_document_if_needed");
+  LOG_W("start_new_document: phase: stop_document_if_needed");
   if (!state_task.retriever_is_iddle()) stop_document();
 
-  LOG_I("start_new_document: phase: load_cached_locs");
+  LOG_W("start_new_document: phase: load_cached_locs");
   const bool loaded = load(epub.get_current_filename());
 
-  LOG_I("start_new_document: phase: check_for_format_changes (force=%d)",
+  LOG_W("start_new_document: phase: check_for_format_changes (force=%d)",
         (int) !loaded);
   check_for_format_changes(count, itemref_index, !loaded);
-  LOG_I("start_new_document: phase: DONE");
+  LOG_W("start_new_document: phase: DONE");
 }
 
 bool 
@@ -1249,25 +1249,25 @@ PageLocs::check_for_format_changes(int16_t count, int16_t itemref_index, bool fo
       (memcmp(epub.get_book_format_params(), &current_format_params, sizeof(current_format_params)) != 0) ||
       !toc.load()) {
 
-    LOG_I("check_for_format_changes: phase: recalc_required");
+    LOG_W("check_for_format_changes: phase: recalc_required");
 
     if (!state_task.retriever_is_iddle()) {
-      LOG_I("check_for_format_changes: phase: stop_document");
+      LOG_W("check_for_format_changes: phase: stop_document");
       stop_document();
     }
 
-    LOG_I("check_for_format_changes: phase: clear_pages_map");
+    LOG_W("check_for_format_changes: phase: clear_pages_map");
     clear();
 
     current_format_params = *epub.get_book_format_params();
 
-    LOG_I("check_for_format_changes: phase: toc.load_from_epub");
+    LOG_W("check_for_format_changes: phase: toc.load_from_epub");
     if (toc.load_from_epub() && !toc.there_is_some_ids()) {
       // The table of content doesn't need to be synch with the
       // page location computation. I.e. there is no relation with HTML Ids
       // that would require information from the page location computation
       // to find where the table of content pages are located.
-      LOG_I("check_for_format_changes: phase: toc.save");
+      LOG_W("check_for_format_changes: phase: toc.save");
       toc.save();
     }
 
@@ -1279,11 +1279,11 @@ PageLocs::check_for_format_changes(int16_t count, int16_t itemref_index, bool fo
       .itemref_index = itemref_index,
       .itemref_count = item_count
     };
-    LOG_I("check_for_format_changes: phase: send_START_DOCUMENT");
+    LOG_W("check_for_format_changes: phase: send_START_DOCUMENT");
     QUEUE_SEND(state_queue, state_queue_data, 0);
 
     event_mgr.set_stay_on(true);
-    LOG_I("check_for_format_changes: phase: DONE");
+    LOG_W("check_for_format_changes: phase: DONE");
   }
 }
 
