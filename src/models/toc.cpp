@@ -7,15 +7,11 @@
 
 #include "models/epub.hpp"
 
-// Defined in epub.cpp
-
-extern bool    package_pred(xml_node node);
-extern bool   metadata_pred(xml_node node);
-extern bool   manifest_pred(xml_node node);
-bool              item_pred(xml_node node);
-bool             spine_pred(xml_node node);
-bool           itemref_pred(xml_node node);
-bool             xmlns_pred(xml_attribute attr);
+// Defined in epub.cpp. The package_pred / metadata_pred / manifest_pred
+// / spine_pred extern declarations that used to live here are gone:
+// the call sites that needed them now go through EPub's predicate-
+// chain accessors (epub.manifest_node(), epub.spine_node(), etc.),
+// which encapsulate the predicate-based lookups in one place.
 
 extern xml_node one_by_attr(xml_node n, const char * name1, const char * name2, const char * attr, const char * value);
 
@@ -229,14 +225,14 @@ TOC::do_nav_points(pugi::xml_node & node, uint8_t level)
 
     clean_filename(filename_to_find);
 
-    if ((n = opf->find_child(package_pred).find_child(manifest_pred)) &&
+    if ((n = epub.manifest_node()) &&
         (n = one_by_attr(n, "item", "opf:item", "href", filename_to_find))) {
       // Is the node with the same filename is found, we then search the
       // itemref in the spine with the same id associated with the item.
       if ((attr = n.attribute("id"))) {
         const char * idref = attr.value();
 
-        if ((n = opf->find_child(package_pred).find_child(spine_pred))) {
+        if ((n = epub.spine_node())) {
 
           int16_t index = 0;
           bool    found = false;
@@ -306,7 +302,7 @@ TOC::load_from_epub()
   // Retrieve the ncx filename
   // Sometimes, the id is "ncx", sometimes "toc"
 
-  if (((node = opf->find_child(package_pred).find_child(manifest_pred)) &&
+  if (((node = epub.manifest_node()) &&
        ((node2 = one_by_attr(node, "item", "opf:item", "id", "ncx")) ||
         (node2 = one_by_attr(node, "item", "opf:item", "id", "toc")))) &&
       (strcmp(node2.attribute("media-type").value(), "application/x-dtbncx+xml") == 0)) {
