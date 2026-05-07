@@ -30,14 +30,14 @@ Page::Page() :
 }
 
 Page::Format
-Page::make_body_format(int16_t font_idx,
-                      int8_t  font_size,
-                      int16_t screen_top,
-                      int16_t screen_bottom)
+Page::make_body_format(int16_t font_index,
+                       int8_t  font_size,
+                       int16_t screen_top,
+                       int16_t screen_bottom)
 {
   return Page::Format{
     .line_height_factor = 0.95,
-    .font_index         = font_idx,
+    .font_index         = font_index,
     .font_size          = font_size,
     .indent             = 0,
     .margin_left        = 0,

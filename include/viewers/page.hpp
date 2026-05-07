@@ -72,7 +72,7 @@ class Page
      * Everything else is fixed (left/right margins 10 px, align
      * left, line_height_factor 0.95, etc.).
      */
-    static Format make_body_format(int16_t font_idx,
+    static Format make_body_format(int16_t font_index,
                                    int8_t  font_size,
                                    int16_t screen_top,
                                    int16_t screen_bottom);

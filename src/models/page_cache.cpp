@@ -704,8 +704,8 @@ bool render_page_into(uint8_t * fb, const PageLocs::PageId & page_id)
   if (font_idx == -1) font_idx = 3;
   int8_t font_size = epub.get_book_format_params()->font_size;
 
-  Page::Format fmt = Page::make_body_format((int16_t) font_idx, font_size,
-                                             page_top, page_bottom);
+  Page::Format fmt = Page::make_body_format(font_idx, font_size,
+                                            page_top, page_bottom);
 
   DOM dom;
   // The Page singleton is shared with book_viewer's foreground
