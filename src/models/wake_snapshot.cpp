@@ -246,7 +246,7 @@ WakeSnapshot::persist()
   size_t total_bytes = sizeof(cached_header_)
                      + (1 + extra_count) * sizeof(PageEntryMeta)
                      + (1 + extra_count) * fb_cache_size_;
-  LOG_I("persist: %u-byte v%u snapshot, %u pages, book_id=%u primary=(%d,%d)",
+  LOG_W("persist: %u-byte v%u snapshot, %u pages, book_id=%u primary=(%d,%d)",
         (unsigned) total_bytes,
         (unsigned) VERSION,
         (unsigned)(1 + extra_count),
@@ -388,7 +388,7 @@ WakeSnapshot::restore_to_panel(uint32_t * book_id_out,
   // screen forever.
   screen.update(Screen::UpdateMode::FULL);
 
-  LOG_I("restore: primary painted for book_id=%u page=(%d,%d), "
+  LOG_W("restore: primary painted for book_id=%u page=(%d,%d), "
         "%u extra pages available for hydration",
         (unsigned) hdr.book_id,
         (int) primary_meta.itemref_index,
@@ -516,7 +516,7 @@ WakeSnapshot::hydrate_page_cache(uint32_t expected_book_id,
   free(scratch);
   fclose(f);
 
-  LOG_I("hydrate: %u extra page(s) injected into PageCache", (unsigned) injected);
+  LOG_W("hydrate: %u extra page(s) injected into PageCache", (unsigned) injected);
   return injected;
 }
 
