@@ -566,23 +566,18 @@ class RetrieverTask
 
           LOG_D("Retrieving itemref --> %d <--", retrieve_queue_data.itemref_index);
 
-          // Per-item progress for the panel. The retriever runs a
-          // long silent paginate-the-whole-book pass after the first
-          // page is shown; before this, the user saw a stale "Retrieving
-          // Font(s)" message indefinitely on a wedged item with no
-          // signal of what step we were on. Shown only on GET_ASAP
-          // (foreground-blocking item retrievals) so background
-          // pagination doesn't redraw the panel underneath an
-          // already-rendered book page.
-          if (retrieve_queue_data.req == RetrieveReq::GET_ASAP) {
-            const int16_t cur   = retrieve_queue_data.itemref_index + 1;
-            const int16_t total = epub.get_item_count();
-            msg_viewer.show(MsgViewer::MsgType::INFO,
-                            false, false,
-                            "Loading book",
-                            "Paginating chapter %d of %d. Please wait.",
-                            (int) cur, (int) total);
-          }
+          // NOTE: a per-GET_ASAP msg_viewer.show ("Paginating
+          // chapter N of M") briefly lived here as diagnostic UX.
+          // Reverted: a second book also stalled at "Loading a
+          // book" under the same firmware, ruling out an epub-
+          // specific bug and pointing at this panel-write as the
+          // most likely regression source. The retriever-thread
+          // panel write contends with the foreground (which has
+          // just painted "Loading a book" via msg_viewer.show and
+          // is now blocked in retrieve_asap waiting on this same
+          // retriever's reply). The diagnostic UX needs a shape
+          // that doesn't redraw the panel from the retriever side
+          // while the foreground is mid-handshake.
 
           int16_t itemref_index;
           if (!page_locs.build_page_locs(retrieve_queue_data.itemref_index)) {
