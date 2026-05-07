@@ -245,7 +245,10 @@ BookViewer::show_fake_cover()
 void
 BookViewer::show_page(const PageLocs::PageId & page_id)
 {
+  LOG_W("show_page: phase: lock_mutex (idx=%d off=%d)",
+        (int) page_id.itemref_index, (int) page_id.offset);
   std::scoped_lock guard(mutex);
+  LOG_W("show_page: phase: locked");
 
   current_page_id = page_id;
 
@@ -254,30 +257,38 @@ BookViewer::show_page(const PageLocs::PageId & page_id)
       (page_id.offset        == 0)) {
 
     if (epub.get_book_format_params()->show_images != 0) {
+      LOG_W("show_page: phase: get_cover_filename");
       std::string fname = epub.get_cover_filename();
       if (!fname.empty()) {
-        // LOG_D("Cover filename: %s", fname);
+        LOG_W("show_page: phase: get_image (%s)", fname.c_str());
         Image * img = epub.get_image(fname, true);
 
         if (img != nullptr) {
+          LOG_W("show_page: phase: page.show_cover");
           page.show_cover(*img);
           delete img;
         }
         else {
           LOG_D("Unable to retrieve cover file: %s", fname.c_str());
+          LOG_W("show_page: phase: show_fake_cover (image load failed)");
           show_fake_cover();
         }
       }
       else {
         LOG_D("It seems there is no cover.");
+        LOG_W("show_page: phase: build_page_at (no cover)");
         build_page_at(page_id);
       }
     }
     else {
+      LOG_W("show_page: phase: show_fake_cover (images disabled)");
       show_fake_cover();
     }
   }
   else {
+    LOG_W("show_page: phase: build_page_at (idx=%d off=%d)",
+          (int) page_id.itemref_index, (int) page_id.offset);
     build_page_at(page_id);
   }
+  LOG_W("show_page: phase: DONE");
 }
