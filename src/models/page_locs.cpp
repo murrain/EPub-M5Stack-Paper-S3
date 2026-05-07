@@ -51,7 +51,7 @@ struct RetrieveQueueData {
 
 // Foreground-side bounded waits on the retriever's reply queues.
 // Sized as broken-book detectors, not expected waits — see the
-// commentary at the call sites and at queue_receive_timed_ms.
+// commentary at the call sites and at mgr_reply_recv_timed_ms.
 static constexpr uint32_t RETRIEVE_ASAP_TIMEOUT_MS  = 10000;  // 10 s
 static constexpr uint32_t STOP_DOCUMENT_TIMEOUT_MS  =  5000;  //  5 s
 
@@ -124,7 +124,7 @@ static constexpr uint32_t STOP_DOCUMENT_TIMEOUT_MS  =  5000;  //  5 s
 // concrete trigger: La Belgariade got the device stuck on "Retrieving
 // Font(s)" indefinitely with no way out short of pulling the SD card.
 static bool
-queue_receive_timed_ms(
+mgr_reply_recv_timed_ms(
     #if EPUB_LINUX_BUILD
       mqd_t           q,
     #else
@@ -956,7 +956,7 @@ PageLocs::retrieve_asap(int16_t itemref_index)
   // an expected wait: a healthy book paginates the requested item
   // in <2s, so 10s leaves comfortable headroom on a slow SD without
   // letting a stuck retriever wedge the UI indefinitely.
-  const bool got_reply = queue_receive_timed_ms(asap_queue, mgr_queue_data,
+  const bool got_reply = mgr_reply_recv_timed_ms(asap_queue, mgr_queue_data,
                                                 RETRIEVE_ASAP_TIMEOUT_MS);
   relax = false;
 
@@ -1020,7 +1020,7 @@ PageLocs::stop_document()
   // recurse settling time on a healthy item) or it's hung. Any
   // longer just delays the foreground without changing the
   // outcome.
-  if (!queue_receive_timed_ms(stopped_queue, mgr_queue_data,
+  if (!mgr_reply_recv_timed_ms(stopped_queue, mgr_queue_data,
                               STOP_DOCUMENT_TIMEOUT_MS)) {
     LOG_E("stop_document: %u ms timeout. Retriever did not confirm "
           "STOPPED — proceeding anyway. Subsequent operations may be "
