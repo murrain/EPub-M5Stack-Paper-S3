@@ -44,8 +44,8 @@ class OptionController : public MenuControllerBase
                          wait_for_key_after_wifi(false),
                          wait_for_key_after_usb(false) { };
 
-    void          enter();
-    void          leave(bool going_to_deep_sleep = false);
+    void          enter() override;
+    void          leave(bool going_to_deep_sleep = false) override;
     void set_font_count(uint8_t count);
 
     // Render the option menu strip. Used by BooksDirController

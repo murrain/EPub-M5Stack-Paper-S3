@@ -5,12 +5,13 @@
 #pragma once
 #include "global.hpp"
 
+#include "controllers/controller.hpp"
 #include "controllers/event_mgr.hpp"
 #include "models/epub.hpp"
 #include "models/page_locs.hpp"
 #include "viewers/books_dir_viewer.hpp"
 
-class BooksDirController
+class BooksDirController : public Controller
 {
   private:
     static constexpr char const * TAG = "BooksDirController";
@@ -47,9 +48,9 @@ class BooksDirController
   public:
     BooksDirController() {};
     void setup();
-    void input_event(const EventMgr::Event & event);
-    void enter();
-    void leave(bool going_to_deep_sleep = false);
+    void input_event(const EventMgr::Event & event) override;
+    void enter() override;
+    void leave(bool going_to_deep_sleep = false) override;
     void save_last_book(const PageLocs::PageId & page_id, bool going_to_deep_sleep);
     void show_last_book();
     void new_orientation() { if (books_dir_viewer != nullptr) books_dir_viewer->setup(); }

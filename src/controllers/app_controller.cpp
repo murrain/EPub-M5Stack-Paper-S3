@@ -22,13 +22,41 @@
 
 #include "screen.hpp"
 
-AppController::AppController() : 
+AppController::AppController() :
   current_ctrl(Ctrl::DIR),
      next_ctrl(Ctrl::NONE)
 {
   for (int i = 0; i < LAST_COUNT; i++) {
     last_ctrl[i] = Ctrl::DIR;
   }
+}
+
+// Maps the Ctrl enum to the corresponding concrete controller.
+// NONE / LAST return nullptr; the four switches that previously
+// open-coded this dispatch (leave / enter / input_event / deep-
+// sleep leave) all became one-line `if (auto * c = ...)` calls.
+//
+// Adding a new controller is now a one-line edit (extend Ctrl,
+// extend this switch). Failing to inherit from Controller is a
+// compile error at the table-population site (the controller
+// won't have the required virtual methods to call), and failing
+// to override a virtual is a compile error at the derived
+// controller's declaration. Both checks force a future addition
+// to follow the contract.
+Controller *
+AppController::controller_for(Ctrl c)
+{
+  switch (c) {
+    case Ctrl::DIR:    return &books_dir_controller;
+    case Ctrl::BOOK:   return &book_controller;
+    case Ctrl::PARAM:  return &book_param_controller;
+    case Ctrl::OPTION: return &option_controller;
+    case Ctrl::TOC:    return &toc_controller;
+    case Ctrl::NONE:
+    case Ctrl::LAST:
+      return nullptr;
+  }
+  return nullptr;
 }
 
 void
@@ -110,15 +138,7 @@ void AppController::launch()
   if (((the_ctrl == Ctrl::LAST) && (last_ctrl[0] != current_ctrl)) || (the_ctrl != current_ctrl)) {
 
     LOG_W("launch: phase: leave_current (current_ctrl=%d)", (int) current_ctrl);
-    switch (current_ctrl) {
-      case Ctrl::DIR:     books_dir_controller.leave(); break;
-      case Ctrl::BOOK:         book_controller.leave(); break;
-      case Ctrl::PARAM:  book_param_controller.leave(); break;
-      case Ctrl::OPTION:     option_controller.leave(); break;
-      case Ctrl::TOC:           toc_controller.leave(); break;
-      case Ctrl::NONE:
-      case Ctrl::LAST:                                  break;
-    }
+    if (Controller * c = controller_for(current_ctrl)) c->leave();
     LOG_W("launch: phase: leave_done");
 
     Ctrl tmp = current_ctrl;
@@ -134,15 +154,7 @@ void AppController::launch()
     }
 
     LOG_W("launch: phase: enter_new (current_ctrl=%d)", (int) current_ctrl);
-    switch (current_ctrl) {
-      case Ctrl::DIR:     books_dir_controller.enter(); break;
-      case Ctrl::BOOK:         book_controller.enter(); break;
-      case Ctrl::PARAM:  book_param_controller.enter(); break;
-      case Ctrl::OPTION:     option_controller.enter(); break;
-      case Ctrl::TOC:           toc_controller.enter(); break;
-      case Ctrl::NONE:
-      case Ctrl::LAST:                                  break;
-    }
+    if (Controller * c = controller_for(current_ctrl)) c->enter();
     LOG_W("launch: phase: enter_done");
   }
   else {
@@ -167,15 +179,7 @@ AppController::input_event(const EventMgr::Event & event)
     }
   #endif
 
-  switch (current_ctrl) {
-    case Ctrl::DIR:     books_dir_controller.input_event(event); break;
-    case Ctrl::BOOK:         book_controller.input_event(event); break;
-    case Ctrl::PARAM:  book_param_controller.input_event(event); break;
-    case Ctrl::OPTION:     option_controller.input_event(event); break;
-    case Ctrl::TOC:           toc_controller.input_event(event); break;
-    case Ctrl::NONE:
-    case Ctrl::LAST:                                             break;
-  }
+  if (Controller * c = controller_for(current_ctrl)) c->input_event(event);
 }
 
 void
@@ -237,13 +241,5 @@ AppController::going_to_deep_sleep()
   // detected and rebuilt on next wake.
   (void) epub.quiesce_book_session();
 
-  switch (current_ctrl) {
-    case Ctrl::DIR:     books_dir_controller.leave(true); break;
-    case Ctrl::BOOK:         book_controller.leave(true); break;
-    case Ctrl::PARAM:  book_param_controller.leave(true); break;
-    case Ctrl::OPTION:     option_controller.leave(true); break;
-    case Ctrl::TOC:           toc_controller.leave(true); break;
-    case Ctrl::NONE:
-    case Ctrl::LAST:                                      break;
-  }
+  if (Controller * c = controller_for(current_ctrl)) c->leave(true);
 }

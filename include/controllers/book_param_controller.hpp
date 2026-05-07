@@ -25,8 +25,8 @@ class BookParamController : public MenuControllerBase
         wait_for_key_after_wifi(false),
             delete_current_book(false) { };
 
-    void          enter();
-    void          leave(bool going_to_deep_sleep = false);
+    void          enter() override;
+    void          leave(bool going_to_deep_sleep = false) override;
     void set_font_count(uint8_t count);
 
     inline void set_book_params_form_is_shown() { book_params_form_is_shown = true; }

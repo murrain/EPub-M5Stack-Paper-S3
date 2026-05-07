@@ -5,6 +5,7 @@
 #pragma once
 #include "global.hpp"
 
+#include "controllers/controller.hpp"
 #include "controllers/event_mgr.hpp"
 
 // Shared dispatch envelope for "menu screen" controllers
@@ -23,23 +24,18 @@
 // dispatch_to_sub_state) — much harder to forget than the
 // previous setup, where each input_event was an independent
 // open-coded if-else chain that drifted apart on every change.
-class MenuControllerBase
+class MenuControllerBase : public Controller
 {
   public:
     // Run the shared dispatch envelope. Derived classes provide
     // the per-controller hooks below; the envelope itself is
-    // identical across all menu screens.
-    void input_event(const EventMgr::Event & event);
+    // identical across all menu screens. `final` because the
+    // envelope is intentionally fixed — derived classes should
+    // customize via has_active_sub_state / dispatch_to_sub_state,
+    // not by overriding the dispatch shell itself.
+    void input_event(const EventMgr::Event & event) final;
 
   protected:
-    // Virtual destructor for safety. Today the menu controllers
-    // exist only as concrete global singletons (book_param_-
-    // controller, option_controller) and are never deleted via
-    // a base pointer, so there's no UB without it. Add it
-    // anyway — the class has virtual methods, and pairing them
-    // with a non-virtual destructor is a standing landmine for
-    // anyone who later holds a MenuControllerBase* and deletes.
-    virtual ~MenuControllerBase() = default;
 
     // True when any sub-form / sub-state with its own dismiss
     // handshake is active. The envelope uses this answer for
