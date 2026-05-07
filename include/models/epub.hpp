@@ -118,10 +118,10 @@ class EPub
      * @return true on parse success, false on failure (with doc
      *         already reset and the LOG_E emitted).
      */
-    static bool parse_xml_or_reset(char *               buffer,
-                                   uint32_t             size,
-                                   pugi::xml_document & doc,
-                                   const char *         site_tag);
+    static bool try_parse_xml(char *               buffer,
+                              uint32_t             size,
+                              pugi::xml_document & doc,
+                              const char *         site_tag);
 
     void                 retrieve_css(ItemInfo             & item         );
     void                   load_fonts();

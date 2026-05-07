@@ -196,8 +196,8 @@ EPub::get_encryption_xml()
 
   if ((unzip.file_exists(fname) &&
       (encryption_data = unzip.get_file(fname, size)) != nullptr)) {
-    if (!parse_xml_or_reset(encryption_data, size, encryption,
-                            "encryption.xml")) {
+    if (!try_parse_xml(encryption_data, size, encryption,
+                       "encryption.xml")) {
       free(encryption_data);
       encryption_data = nullptr;
       return false;
@@ -242,7 +242,7 @@ EPub::get_opf_filename(std::string & filename)
   xml_node        node;
   xml_attribute   attr;
 
-  if (!parse_xml_or_reset(data, size, doc, "container.xml")) {
+  if (!try_parse_xml(data, size, doc, "container.xml")) {
     free(data);
     return false;
   }
@@ -383,7 +383,7 @@ EPub::get_opf(std::string & filename)
 
     if (!(opf_data = unzip.get_file(filename.c_str(), size))) ERR(6);
 
-    if (!parse_xml_or_reset(opf_data, size, opf, "OPF")) {
+    if (!try_parse_xml(opf_data, size, opf, "OPF")) {
       free(opf_data);
       opf_data = nullptr;
       return false;
@@ -800,7 +800,7 @@ EPub::get_item(pugi::xml_node itemref,
       }
       LOG_D("Reading file %s", attr.value());
 
-      if (!parse_xml_or_reset(item.data, size, item.xml_doc,
+      if (!try_parse_xml(item.data, size, item.xml_doc,
                               "item_doc")) {
         if (item.data != nullptr) {
           free(item.data);
@@ -1058,7 +1058,7 @@ EPub::close_file()
 }
 
 bool
-EPub::parse_xml_or_reset(char *               buffer,
+EPub::try_parse_xml(char *               buffer,
                          uint32_t             size,
                          pugi::xml_document & doc,
                          const char *         site_tag)

@@ -329,23 +329,22 @@ TOC::load_from_epub()
 
   // parse xml and load navPoint entries
 
-  if (!epub.parse_xml_or_reset(ncx_data, ncx_size, *ncx_opf, "NCX")) {
+  if (!epub.try_parse_xml(ncx_data, ncx_size, *ncx_opf, "NCX")) {
     goto error;
   }
-  else {
-    if ((node = ncx_opf->child("ncx"     )
-                        .child("navMap"  )
-                        .child("navPoint"))) {
 
-      if (char_pool == nullptr) {
-        char_pool = new CharPool;
-        if (char_pool == nullptr) goto error;
-      }
+  if ((node = ncx_opf->child("ncx"     )
+                      .child("navMap"  )
+                      .child("navPoint"))) {
 
-      if (!do_nav_points(node, 0)) goto error;
-
-      result = !entries.empty();
+    if (char_pool == nullptr) {
+      char_pool = new CharPool;
+      if (char_pool == nullptr) goto error;
     }
+
+    if (!do_nav_points(node, 0)) goto error;
+
+    result = !entries.empty();
   }
 
   goto ok;
