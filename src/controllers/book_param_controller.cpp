@@ -255,12 +255,17 @@ BookParamController::set_font_count(uint8_t count)
   book_params_form_entries[2].u.ch.choice_count = count;
 }
 
-void 
+void
 BookParamController::enter()
 {
+  LOG_W("enter: phase: BEGIN");
+  LOG_W("enter: phase: toc_check");
   menu[1].visible = toc.is_ready() && !toc.is_empty();
+  LOG_W("enter: phase: menu_viewer.show");
   menu_viewer.show(menu);
+  LOG_W("enter: phase: form_state_reset");
   book_params_form_is_shown = false;
+  LOG_W("enter: phase: DONE");
 }
 
 void 
