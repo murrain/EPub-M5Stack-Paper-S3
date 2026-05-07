@@ -156,8 +156,17 @@ class Fonts
      *
      * @return true on success, false if any of the 4 font files
      *         failed to load. Cache is unchanged on false.
+     *
+     * [[nodiscard]]: silent drops were the symptom in audit finding
+     * "🔴 book_param_controller.cpp:159, 339 (adjust_default_font
+     * bool ignored)" — a font that fails to load leaves the cache
+     * on the previous default and the next render reads stale
+     * metrics, breaking layout. Callers MUST handle the bool;
+     * (void)-casting is acceptable only when a downstream guard
+     * (e.g. an explicit msg_viewer.show + revert of local var)
+     * absorbs the failure path.
      */
-    bool adjust_default_font(uint8_t font_index);
+    [[nodiscard]] bool adjust_default_font(uint8_t font_index);
 
   private:
     typedef std::vector<FontEntry> FontCache;
