@@ -282,17 +282,22 @@ BookController::open_book_file(
     // info during render. Lock-order: cache stop, then page_locs
     // stop, then file close. Same shape used in BooksDirController
     // ::enter for the regular nav-back teardown.
+    LOG_I("open_book_file: phase: page_cache.stop");
     page_cache.stop();
+    LOG_I("open_book_file: phase: page_locs.stop_document");
     page_locs.stop_document();
   }
 
+  LOG_I("open_book_file: phase: epub.open_file");
   if (epub.open_file(book_filename)) {
     if (new_document) {
+      LOG_I("open_book_file: phase: page_locs.start_new_document");
       page_locs.start_new_document(epub.get_item_count(), page_id.itemref_index);
       // Re-enable cache for this book. Allocation may fail (PSRAM
       // tight) — that's fine, foreground render still works and
       // is_active() returns false so show_and_capture skips the
       // residency request.
+      LOG_I("open_book_file: phase: page_cache.start");
       if (page_cache.start()) {
         // Phase C warm-wake hydration: if the just-opened book
         // matches the wake_snapshot's persisted book_id and
@@ -321,14 +326,18 @@ BookController::open_book_file(
     else {
       page_locs.check_for_format_changes(epub.get_item_count(), page_id.itemref_index);
     }
+    LOG_I("open_book_file: phase: book_viewer.init");
     book_viewer.init();
+    LOG_I("open_book_file: phase: page_locs.get_page_id");
     const PageLocs::PageId * id = page_locs.get_page_id(page_id);
     if (id != nullptr) {
       current_page_id.itemref_index = id->itemref_index;
       current_page_id.offset        = id->offset;
       // show_and_capture(current_page_id);
+      LOG_I("open_book_file: phase: DONE (success)");
       return true;
     }
+    LOG_I("open_book_file: phase: DONE (get_page_id returned null)");
   }
   return false;
 }
