@@ -145,6 +145,24 @@ revert_to_defaults()
                   "E-book parameters reverted",
                   "E-book parameters reverted to default values.");
 
+  // Defensive re-stop of the retriever immediately before the font
+  // mutation, mirroring the form path's "quiesce before font swap"
+  // contract at lines 323-326. The earlier stop_document at the top
+  // of this function covers the steady state, but msg_viewer.show
+  // ran in between and (in principle) could be a future re-arm
+  // path; this call is idempotent on already-quiesced state and
+  // keeps the safety contract co-located with the site that needs
+  // it. invalidate_all is NOT repeated here — line ~141 already
+  // dropped every cache entry for the format-param edit, no new
+  // entries can have been added between there and here (pre-paint
+  // only writes via the prepaint_queue, which msg_viewer.show
+  // doesn't enqueue), so a second invalidate_all would walk the
+  // already-empty entry table for no benefit.
+  if (old_use_fonts_in_book != book_format_params->use_fonts_in_book ||
+      old_font              != book_format_params->font) {
+    page_locs.stop_document();
+  }
+
   if (old_use_fonts_in_book != book_format_params->use_fonts_in_book) {
     if (book_format_params->use_fonts_in_book) {
       epub.load_fonts();

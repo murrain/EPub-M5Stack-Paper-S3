@@ -807,8 +807,19 @@ PageLocs::build_page_locs(int16_t itemref_index)
   std::scoped_lock guard(book_viewer.get_mutex());
 
   Font * font = fonts.get(ScreenBottom::FONT);
-  page_bottom = font->get_line_height(ScreenBottom::FONT_SIZE) + (font->get_line_height(ScreenBottom::FONT_SIZE) >> 1);
-  
+  // page_bottom MUST match the formula used by both renderers
+  // (book_viewer.cpp:54 and page_cache.cpp:688) — pagination breaks
+  // pages at this boundary, the renderers clip at the same boundary,
+  // and any divergence shifts every line of body text by a few
+  // pixels and may clip or duplicate the last visible line. Prior
+  // to 2026-05-07 this used `get_line_height + (get_line_height >>
+  // 1)` (~2.0× the line height) while the renderers used
+  // `get_chars_height + 15`; on most fonts those differ by 5-15 px
+  // and produce silent layout drift across the entire book. The
+  // fix is to match the renderers — they are the source of truth
+  // for what actually appears on the panel.
+  page_bottom = font->get_chars_height(ScreenBottom::FONT_SIZE) + 15;
+
   //page_out.set_compute_mode(Page::ComputeMode::LOCATION);
 
   //show_images = current_format_params.show_images == 1;
