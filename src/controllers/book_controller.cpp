@@ -132,11 +132,13 @@ BookController::show_and_capture(const PageLocs::PageId & page_id)
   //     memcpy on this same thread.
   // So `cached` is stable for the duration of this scope.
   bool cache_hit = false;
+  LOG_W("show_and_capture: phase: page_cache.get");
   const uint8_t * cached = page_cache.get(page_id, fh);
   if (cached != nullptr) {
     uint8_t * panel_fb = screen.get_panel_framebuffer();
     size_t    fb_size  = screen.get_panel_framebuffer_size();
     if ((panel_fb != nullptr) && (fb_size > 0)) {
+      LOG_W("show_and_capture: phase: cache_hit memcpy+update");
       std::memcpy(panel_fb, cached, fb_size);
       // FAST = MODE_DU on PaperS3 (~120 ms). Page::paint normally
       // uses FAST for foreground page turns; the cache path is the
@@ -146,7 +148,9 @@ BookController::show_and_capture(const PageLocs::PageId & page_id)
     }
   }
   if (!cache_hit) {
+    LOG_W("show_and_capture: phase: book_viewer.show_page (cache miss)");
     book_viewer.show_page(page_id);
+    LOG_W("show_and_capture: phase: book_viewer.show_page DONE");
   }
 
   // Identify the book by its NVS id so the snapshot meta survives the
@@ -180,6 +184,7 @@ BookController::enter()
   // Resume pre-paint pthread (was paused on the way out via leave).
   // Idempotent if cache wasn't paused (e.g. on first entry into
   // BOOK after open_book_file's start()), so always safe to call.
+  LOG_W("enter: phase: page_cache.resume");
   page_cache.resume();
 
   #if DEBUGGING && EPUB_INKPLATE_BUILD
@@ -192,7 +197,9 @@ BookController::enter()
     ESP::show_internal_heap_info("BookController::enter");
   #endif
 
+  LOG_W("enter: phase: check_for_format_changes");
   page_locs.check_for_format_changes(epub.get_item_count(), current_page_id.itemref_index);
+  LOG_W("enter: phase: get_page_id");
   const PageLocs::PageId * id = page_locs.get_page_id(current_page_id);
   if (id != nullptr) {
     current_page_id.itemref_index = id->itemref_index;
@@ -202,7 +209,11 @@ BookController::enter()
     current_page_id.itemref_index = 0;
     current_page_id.offset        = 0;
   }
+  LOG_W("enter: phase: show_and_capture (idx=%d off=%d)",
+        (int) current_page_id.itemref_index,
+        (int) current_page_id.offset);
   show_and_capture(current_page_id);
+  LOG_W("enter: phase: DONE");
 }
 
 void
