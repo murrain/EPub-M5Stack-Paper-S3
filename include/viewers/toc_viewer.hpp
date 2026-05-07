@@ -52,6 +52,15 @@ class TocViewer
     int16_t prev_column();
 
     int16_t get_index_at(uint16_t x, uint16_t y) {
+      // Guard against unsigned underflow when the tap lands in
+      // the dead zone above the first entry. Without this check
+      // (y - FIRST_ENTRY_YPOS) wraps and divides into a huge
+      // idx that happens to fail the entries_per_page bounds
+      // check — accidentally correct but relying on overflow
+      // arithmetic. Mirrors the explicit y guard in
+      // LinearBooksDirViewer::get_index_at and
+      // MatrixBooksDirViewer::get_index_at.
+      if (y < FIRST_ENTRY_YPOS) return -1;
       int16_t idx = (y - FIRST_ENTRY_YPOS) / ENTRY_HEIGHT;
       return (idx >= entries_per_page) ? -1 : (current_page_nbr * entries_per_page) + idx;
     }

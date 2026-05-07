@@ -145,6 +145,22 @@ revert_to_defaults()
                   "E-book parameters reverted",
                   "E-book parameters reverted to default values.");
 
+  // Mirror the form path's "quiesce immediately before font swap"
+  // contract (lines 323-326 in this file). The earlier stop_document
+  // at the top of this function and invalidate_all at line ~141 are
+  // for the format-param edit; in between, msg_viewer.show painted
+  // the panel and could in principle re-arm pre-paint. Doing the
+  // quiesce again here, RIGHT before the font mutations, makes the
+  // safety contract co-located with the call site that needs it —
+  // matching the canonical form-path pattern. Both calls are
+  // idempotent on already-quiesced state, so the cost is zero
+  // when nothing else has fired in between.
+  if (old_use_fonts_in_book != book_format_params->use_fonts_in_book ||
+      old_font              != book_format_params->font) {
+    page_locs.stop_document();
+    page_cache.invalidate_all();
+  }
+
   if (old_use_fonts_in_book != book_format_params->use_fonts_in_book) {
     if (book_format_params->use_fonts_in_book) {
       epub.load_fonts();
