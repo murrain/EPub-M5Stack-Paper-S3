@@ -138,7 +138,16 @@ class PageLocs
     void check_for_format_changes(int16_t count, int16_t itemref_index, bool force = false);
     void    computation_completed();
     void       start_new_document(int16_t count, int16_t itemref_index);
-    void            stop_document();
+    // Returns true on confirmed STOP/STOPPED handshake (retriever
+    // is provably idle, safe to free EPUB state). Returns false on
+    // STOP_DOCUMENT_TIMEOUT_MS timeout — the retriever may still be
+    // mid-build, accessing EPUB state. Callers that follow with
+    // close_file (BooksDirController::enter, EPub::open_file's
+    // internal close-then-open) MUST honor a false return and skip
+    // the close, otherwise the still-live retriever's next
+    // dereference of freed item_info / opf / css / unzip state is
+    // a LoadProhibited UAF.
+    bool            stop_document();
 
     inline const PageInfo* get_page_info(const PageId & page_id) {
       std::scoped_lock   guard(mutex);

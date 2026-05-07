@@ -281,9 +281,18 @@ BooksDirController::enter()
   // stop_document also deep-cleans PageLocs::item_info, which would
   // otherwise hold dangling css_list pointers into the now-freed
   // EPub::css_cache.
-  page_cache.stop();
-  page_locs.stop_document();
-  epub.close_file();
+  //
+  // quiesce_book_session() returns false on stop_document timeout
+  // — see EPub::quiesce_book_session for the UAF rationale.
+  // Skipping close_file leaves the EPUB state resident, which is
+  // strictly better than crashing.
+  if (epub.quiesce_book_session()) {
+    epub.close_file();
+  }
+  else {
+    LOG_E("BooksDirController::enter: quiesce timed out; "
+          "skipping epub.close_file to avoid retriever UAF.");
+  }
 
   config.get(Config::Ident::DIR_VIEW, &viewer_id);
   const char *view = (viewer_id == LINEAR_VIEWER) ? "linear" :
