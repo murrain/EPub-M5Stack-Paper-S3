@@ -319,6 +319,18 @@ BookParamController::enter()
   LOG_W("enter: phase: DONE");
 }
 
+void
+BookParamController::redraw_underlying_state()
+{
+  // Repaint the book page that lives beneath the menu strip,
+  // then the menu strip on top. show_and_capture takes the
+  // page_cache hit path when available (memcpy + MODE_DU,
+  // ~120 ms) so this is fast in the common case. menu_viewer.
+  // show then commits the strip via update_region.
+  book_controller.show_and_capture(book_controller.get_current_page_id());
+  menu_viewer.show(menu);
+}
+
 void 
 BookParamController::leave(bool going_to_deep_sleep)
 {
@@ -439,7 +451,12 @@ BookParamController::dispatch_to_sub_state(
       }
       // (Font change handled above, before persisting PARS.)
 
-      menu_viewer.clear_highlight();
+      // form_viewer cleared a region the size of the screen
+      // (form_viewer.hpp:665) — covering both the menu strip and
+      // the book content beneath. clear_highlight only refreshes
+      // the bottom hint strip, leaving form pixels visible
+      // everywhere else. Full redraw of book + strip is required.
+      redraw_underlying_state();
     }
   }
   else if (page_nav_is_shown) {
@@ -464,7 +481,9 @@ BookParamController::dispatch_to_sub_state(
         }
       }
       else {
-        menu_viewer.show(menu);
+        // page_nav_viewer covers the same near-full-screen area
+        // as form_viewer; same redraw rule applies on cancel.
+        redraw_underlying_state();
       }
     }
   }
