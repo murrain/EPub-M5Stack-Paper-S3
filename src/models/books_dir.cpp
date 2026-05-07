@@ -692,6 +692,14 @@ BooksDir::refresh(char * book_filename, int16_t & book_index, bool force_init)
               if (strcmp(book_filename, the_book->filename) == 0) book_index = db.get_record_count() - 1;
             }
 
+            // No quiesce_book_session needed here. The scanner
+            // opens each EPUB for metadata-only extraction (title,
+            // author, cover image); page_locs.start_new_document
+            // is not called against these files, so the retriever
+            // is not building against them. The async-refresh
+            // caller asserts !epub.is_file_open() at entry, which
+            // means no concurrent foreground reader either. close_
+            // file here just unwinds the metadata-extract state.
             epub.close_file();
             free(the_book);
 

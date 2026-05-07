@@ -1015,6 +1015,12 @@ PageLocs::retrieve_asap(int16_t itemref_index)
 }
 
 bool
+PageLocs::is_retriever_idle()
+{
+  return state_task.retriever_is_iddle();
+}
+
+bool
 PageLocs::stop_document()
 {
   StateQueueData state_queue_data;

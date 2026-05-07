@@ -573,11 +573,20 @@ http_server_stop()
 bool
 start_web_server()
 {
-  page_locs.abort_threads();
-  epub.close_file();
+  // The page_locs.abort_threads() + epub.close_file() that used to
+  // run here was a UAF surface (audit 04-architecture.md A1) and
+  // also redundant: every caller (option_controller::wifi_mode,
+  // book_param_controller::wifi_mode) now calls
+  // epub.quiesce_book_session() + epub.close_file() before invoking
+  // start_web_server. Removing the duplicate teardown closes the
+  // last raw-close-file in this file. abort_threads specifically
+  // had hard-kill semantics (join the threads, no return); keeping
+  // those threads alive until esp_restart is fine — they'll
+  // observe the abort flag set by quiesce_book_session, idle, and
+  // get power-cut on restart.
 
-  msg_viewer.show(MsgViewer::MsgType::WIFI, false, true, 
-    "Web Server Starting", 
+  msg_viewer.show(MsgViewer::MsgType::WIFI, false, true,
+    "Web Server Starting",
     "The Web server is now establishing the connexion with the WiFi router. Please wait.");
 
   #if defined(INKPLATE_6PLUS)

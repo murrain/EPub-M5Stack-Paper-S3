@@ -224,10 +224,19 @@ static void
 wifi_mode()
 {
   #if EPUB_INKPLATE_BUILD
-    epub.close_file();
-    fonts.clear(true);
-    fonts.clear_glyph_caches();
-    
+    // Same UAF guard as option_controller's wifi_mode. quiesce
+    // the retriever + pre-paint before tearing down state they
+    // hold pointers into.
+    if (epub.quiesce_book_session()) {
+      epub.close_file();
+      fonts.clear(true);
+      fonts.clear_glyph_caches();
+    }
+    else {
+      LOG_E("wifi_mode: retriever did not idle; book state remains "
+            "resident through wifi session.");
+    }
+
     event_mgr.set_stay_on(true); // DO NOT sleep
 
     if (start_web_server()) {
@@ -461,6 +470,17 @@ BookParamController::dispatch_to_sub_state(
         if (stat(filepath.c_str(), &file_stat) != -1) {
           LOG_I("Deleting %s...", filepath.c_str());
 
+          // Quiesce before close — the user just confirmed delete-
+          // book, so a still-live retriever holding pointers into
+          // the about-to-be-freed EPub state would UAF on its next
+          // dereference. On timeout, refuse the delete and show an
+          // alert; the user can retry once the retriever surfaces.
+          if (!epub.quiesce_book_session()) {
+            msg_viewer.show_alert(
+                "Could not delete book",
+                "Reader is busy. Try again in a moment.");
+            return;
+          }
           epub.close_file();
           unlink(filepath.c_str());
 

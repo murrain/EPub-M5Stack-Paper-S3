@@ -334,6 +334,14 @@
 
   void exit_app()
   {
+    // Linux exit path: quiesce before tearing down book + font
+    // state, mirroring the firmware's deep-sleep teardown. On
+    // quiesce timeout (highly unlikely on Linux but possible if
+    // the retriever is genuinely wedged), proceed anyway — the
+    // process is exiting, the OS will reap the threads, and any
+    // late dereference is into freed memory inside a dying
+    // process.
+    (void) epub.quiesce_book_session();
     fonts.clear_glyph_caches();
     fonts.clear(true);
     epub.close_file();

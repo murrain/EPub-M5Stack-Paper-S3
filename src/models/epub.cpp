@@ -22,6 +22,7 @@
   #include "esp.hpp"
 #endif
 
+#include <cassert>
 #include <iostream>
 #include <iomanip>
 #include <iterator>
@@ -1015,10 +1016,25 @@ EPub::clear_item_data(ItemInfo & item)
   item.itemref_index = -1;
 }
 
-bool 
+bool
 EPub::close_file()
 {
   if (!file_is_open) return true;
+
+  // Runtime guard: close_file is only safe when the retriever
+  // (RetrieverTask + StateTask) has confirmed idle. The audit
+  // (04-architecture.md A1) catalogued multiple sites that
+  // raw-closed under a live retriever, leading to LoadProhibited
+  // UAFs in the menu→book→menu→book→menu sequence. The canonical
+  // safe entry point is EPub::quiesce_book_session() which
+  // returns bool and lets the caller skip close on timeout. This
+  // assert catches anyone who bypasses it. In release builds the
+  // assert compiles out; the runtime cost in debug builds is one
+  // bool fetch.
+  assert(page_locs.is_retriever_idle() &&
+         "EPub::close_file called with retriever still running. "
+         "Use EPub::quiesce_book_session() and gate close_file on "
+         "its bool return.");
 
   clear_item_data(current_item_info);
 
