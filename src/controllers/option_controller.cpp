@@ -27,6 +27,13 @@
   #include "viewers/usb_msc_viewer.hpp"
 #endif
 
+// File-scope TAG for LOG_E / LOG_W in static free functions
+// (wifi_mode, usb_drive_mode, ntp_clock_adjust, etc.). The class-
+// member TAG in option_controller.hpp is only visible inside class
+// methods, so static helpers in this TU need their own. Convention:
+// same string as the class member.
+static constexpr char const * TAG = "OptionController";
+
 // static int8_t boolean_value;
 
 static Screen::Orientation     orientation;

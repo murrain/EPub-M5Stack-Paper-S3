@@ -31,6 +31,14 @@
 
 #include <sys/stat.h>
 
+// File-scope TAG for LOG_E / LOG_W in static free functions
+// (revert_to_defaults, wifi_mode, etc.). The class-member TAG in
+// book_param_controller.hpp is only visible inside class methods,
+// so static helpers in this TU need their own. Convention: same
+// string as the class member, so log lines from member and non-
+// member code are indistinguishable.
+static constexpr char const * TAG = "BookParamController";
+
 static int8_t show_images;
 static int8_t font_size;
 static int8_t use_fonts_in_book;
