@@ -41,13 +41,24 @@ class Fonts
     void clear_everything();
     /**
      * @brief Get font at index
-     * 
+     *
      * @param index THe font index number
      * @return Pointer to the font at index. If there is no font at index,
      *         it returns the pointer to the first font in the list.
+     *
+     * Concurrency contract: this is a LOCK-FREE read. The
+     * returned Font* is valid only as long as the cache isn't
+     * mutated. Mutators are: adjust_default_font (transactional
+     * 4-style swap), clear, clear_everything, clear_glyph_caches.
+     * They MUST NOT run concurrently with renderers / page_locs
+     * retriever / page_cache pre-paint that hold the returned
+     * pointer. Callers in book_param_controller and
+     * option_controller enforce this by quiescing those
+     * threads (page_locs.stop_document + page_cache.invalidate
+     * _all) before invoking adjust_default_font.
      */
     Font * get(int16_t index) {
-      Font * f; 
+      Font * f;
       if (index >= font_cache.size()) {
         LOG_E("Fonts.get(): Wrong index: %d vs size: %u", index, font_cache.size());
         f = font_cache.at(1).font;
@@ -125,12 +136,29 @@ class Fonts
 
     void clear_glyph_caches();
 
-    void adjust_default_font(uint8_t font_index);
+    /**
+     * @brief Swap the user-default font (4 styles) atomically.
+     *
+     * Pre-loads regular / bold / italic / bold-italic for the
+     * requested font_index into temporary slots, validates that
+     * all four loaded successfully, and only then swaps them
+     * into the cache at indices 3..6 (replacing the previous
+     * default font). On any failure during pre-load, the
+     * temporaries are deleted and the cache is left untouched —
+     * the previous default font stays valid.
+     *
+     * Was previously a non-transactional `replace()` chain that
+     * could leave the cache mid-swap (e.g. Tinos regular at
+     * index 3, old-font italic at index 5) — mismatched metrics
+     * broke layout and made books fail to load. The caller in
+     * BookParamController checks the return value and reverts
+     * the persisted FONT param on failure.
+     *
+     * @return true on success, false if any of the 4 font files
+     *         failed to load. Cache is unchanged on false.
+     */
+    bool adjust_default_font(uint8_t font_index);
 
-    bool replace(int16_t             index,
-                 const std::string & name, 
-                 FaceStyle           style,
-                 const std::string & filename);
   private:
     typedef std::vector<FontEntry> FontCache;
     FontCache font_cache;

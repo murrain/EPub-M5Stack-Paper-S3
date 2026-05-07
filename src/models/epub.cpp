@@ -915,7 +915,28 @@ EPub::open_file(const std::string & epub_filename)
   open_params(epub_filename);
   update_book_format_params();
 
-  fonts.adjust_default_font(book_format_params.font);
+  // No page_locs.stop_document() / page_cache.invalidate_all()
+  // hoist needed here (unlike BookParamController /
+  // OptionController font-change paths). EPub::open is only
+  // reached when no book session is live — caller has already
+  // gone through close_file or this is the first open after
+  // boot. The retriever is idle and pre-paint is in pause(),
+  // so nothing holds a Font* that the swap below could
+  // dereference-after-free.
+  //
+  // adjust_default_font now returns bool. If it fails on book
+  // open (PARS already names a font that won't load — e.g.
+  // pre-existing corruption from a manual SD edit, or a font
+  // file that's been removed since), the cache stays on the
+  // current default and the book renders with that font.
+  // We log but don't fail the open: showing the user the book
+  // with the wrong font is better UX than refusing to open it.
+  // The PARS could be repaired by the user through the menu.
+  if (!fonts.adjust_default_font(book_format_params.font)) {
+    LOG_E("EPub::open: adjust_default_font(%u) failed; rendering with "
+          "current default font instead",
+          (unsigned) book_format_params.font);
+  }
 
   clear_item_data(current_item_info);
 

@@ -589,6 +589,31 @@ OptionController::dispatch_to_sub_state(
     if (form_viewer.event(event)) {
       font_form_is_shown = false;
 
+      // Quiesce readers BEFORE the font swap. Same UAF concern
+      // as BookParamController: retriever / pre-paint hold
+      // Font* via fonts.get(); a concurrent dereference during
+      // the transactional swap (which deletes the old font_-
+      // cache.at(3..6).font) would UAF.
+      if (old_default_font != default_font) {
+        page_locs.stop_document();
+        epub.update_book_format_params();
+        // Validate font load BEFORE persisting Config. Mirrors
+        // BookParamController: the global config is per-device
+        // and an unloadable DEFAULT_FONT here would persist
+        // across reboots, breaking the device for every book
+        // until the user manually edits config or recovers via
+        // the per-book PARS path. Revert the local
+        // `default_font` on failure so config.put writes the
+        // working previous value.
+        if (!fonts.adjust_default_font(default_font)) {
+          msg_viewer.show(MsgViewer::MsgType::ALERT, false, false,
+                          "Font Load Failed",
+                          "Could not load the selected default font. "
+                          "The previous font is still in use.");
+          default_font = old_default_font;
+        }
+      }
+
       config.put(Config::Ident::SHOW_IMAGES,        show_images       );
       config.put(Config::Ident::FONT_SIZE,          font_size         );
       config.put(Config::Ident::DEFAULT_FONT,       default_font      );
@@ -597,14 +622,11 @@ OptionController::dispatch_to_sub_state(
 
       if ((old_show_images        != show_images       ) ||
           (old_font_size          != font_size         ) ||
-          (old_default_font       != default_font      ) ||
           (old_use_fonts_in_books != use_fonts_in_books)) {
+        // Font change already handled above; only run
+        // stop_document for OTHER param changes here.
         page_locs.stop_document();
         epub.update_book_format_params();
-      }
-
-      if (old_default_font != default_font) {
-        fonts.adjust_default_font(default_font);
       }
 
       if (old_use_fonts_in_books != use_fonts_in_books) {

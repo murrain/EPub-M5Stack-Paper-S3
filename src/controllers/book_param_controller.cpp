@@ -299,6 +299,47 @@ BookParamController::dispatch_to_sub_state(
 
       BookParams * book_params = epub.get_book_params();
 
+      // Quiesce the retriever (page_locs) and pre-paint
+      // (page_cache) BEFORE swapping the font_cache. Both hold
+      // raw Font* pointers obtained via fonts.get(); if they
+      // dereference one mid-swap (the transactional commit
+      // deletes the previous font_cache.at(3..6).font), it's a
+      // UAF. The pre-refactor code happened to do this safely
+      // by accident — stop_document ran inside the is_modified
+      // block which preceded adjust_default_font. The new
+      // ordering puts adjust BEFORE the puts (so we can
+      // pre-validate), so we must hoist the stops up too.
+      //
+      // page_locs.stop_document waits via STOP/STOPPED handshake.
+      // page_cache.invalidate_all drops cache entries and pauses
+      // pre-paint until the next residency request. Both are
+      // O(ms); both are safe to call even if no font change
+      // actually happens (idempotent on quiesced state).
+      if (old_font != font) {
+        page_locs.stop_document();
+        page_cache.invalidate_all();
+      }
+
+      // Validate the font change BEFORE persisting PARS. The
+      // pre-refactor flow saved the new FONT param first, then
+      // attempted the load — if any of the 4 styles failed, the
+      // PARS file already had the broken font index and the book
+      // became unrecoverable without external file editing
+      // (user-reported Tinos symptom). adjust_default_font is
+      // now transactional + boolean: on failure the cache is
+      // left as the previous default and we revert the local
+      // `font` so book_params->put doesn't persist the
+      // unloadable index.
+      if (old_font != font) {
+        if (!fonts.adjust_default_font(font)) {
+          msg_viewer.show(MsgViewer::MsgType::ALERT, false, false,
+                          "Font Load Failed",
+                          "Could not load the selected font. "
+                          "The previous font is still in use.");
+          font = old_font;  // PARS will keep the working previous value.
+        }
+      }
+
       if (show_images       !=       old_show_images) book_params->put(BookParams::Ident::SHOW_IMAGES,        show_images      );
       if (font_size         !=         old_font_size) book_params->put(BookParams::Ident::FONT_SIZE,          font_size        );
       if (font              !=              old_font) book_params->put(BookParams::Ident::FONT,               font             );
@@ -327,10 +368,7 @@ BookParamController::dispatch_to_sub_state(
           fonts.clear_glyph_caches();
         }
       }
-
-      if (old_font != font) {
-        fonts.adjust_default_font(font);
-      }
+      // (Font change handled above, before persisting PARS.)
 
       menu_viewer.clear_highlight();
     }
