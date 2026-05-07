@@ -5,6 +5,7 @@
 #pragma once
 #include "global.hpp"
 
+#include "controllers/controller.hpp"
 #include "controllers/event_mgr.hpp"
 
 /**
@@ -78,6 +79,16 @@ class AppController
 
     void going_to_deep_sleep();
     void launch();
+
+  private:
+    // Look up the concrete Controller for a Ctrl enum value.
+    // Returns nullptr for Ctrl::NONE / Ctrl::LAST. Single source
+    // of truth for the dispatch table; replaces four parallel
+    // switches that had to stay in lockstep when adding a
+    // controller. See comment at the definition for the
+    // compile-time enforcement story.
+    Controller * controller_for(Ctrl c);
+  public:
 
     // True if a controller transition has been requested (via
     // set_controller) but launch() hasn't yet processed it. Used by
