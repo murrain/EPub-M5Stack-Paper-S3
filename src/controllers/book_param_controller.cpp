@@ -451,11 +451,11 @@ BookParamController::dispatch_to_sub_state(
       }
       // (Font change handled above, before persisting PARS.)
 
-      // form_viewer cleared a region the size of the screen
-      // (form_viewer.hpp:665) — covering both the menu strip and
-      // the book content beneath. clear_highlight only refreshes
-      // the bottom hint strip, leaving form pixels visible
-      // everywhere else. Full redraw of book + strip is required.
+      // FormViewer::show clears a near-full-screen region —
+      // covering both the menu strip and the book content
+      // beneath. clear_highlight only refreshes the bottom hint
+      // strip, leaving form pixels visible everywhere else. Full
+      // redraw of book + strip is required.
       redraw_underlying_state();
     }
   }

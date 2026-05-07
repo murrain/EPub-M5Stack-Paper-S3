@@ -73,15 +73,14 @@ class MenuControllerBase : public Controller
     // responsible for: the underlying content (book page for
     // BookParamController, books-dir for OptionController) AND
     // the menu strip on top. Called after a sub-state (form,
-    // page-nav) closes — those overlays paint over the entire
-    // screen (form_viewer.hpp clears Screen::get_width()-40 ×
-    // Screen::get_height()-...), so when they dismiss the
-    // book/dir pixels they covered are gone and need to be
-    // redrawn. menu_viewer.show alone only repaints the top
-    // strip, leaving the form's pixels in the body region —
-    // visible as "the book text didn't come back" after closing
-    // font settings. Call this from any sub-state-close path
-    // that doesn't itself transition out of the controller.
+    // page-nav) closes — those overlays paint over a near-full-
+    // screen region, so when they dismiss the book/dir pixels
+    // they covered are gone and need to be redrawn.
+    // menu_viewer.show alone only repaints the top strip,
+    // leaving the form's pixels in the body region — visible as
+    // "the book text didn't come back" after closing font
+    // settings. Call this from any sub-state-close path that
+    // doesn't itself transition out of the controller.
     //
     // Persistent-strip callers (BooksDirController dispatch) skip
     // this, same as they skip menu_viewer.show — the outer
