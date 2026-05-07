@@ -46,6 +46,8 @@ uint16_t MenuViewer::compute_region_height()
 
 void MenuViewer::show(MenuEntry * the_menu, uint8_t entry_index, bool clear_screen)
 {
+  LOG_W("show: phase: BEGIN (entry_index=%u clear=%d)",
+        (unsigned) entry_index, (int) clear_screen);
   Font * font = fonts.get(1);
 
   if (font == nullptr) {
@@ -199,7 +201,9 @@ void MenuViewer::show(MenuEntry * the_menu, uint8_t entry_index, bool clear_scre
   // emit a clean GC16 within the region and flush local ghosting.
   // Subsequent in-menu interactions (highlight, tap-and-hold
   // hint) call commit_region with FAST.
+  LOG_W("show: phase: commit_region (BUDGETED)");
   commit_region(Screen::UpdateMode::BUDGETED, clear_screen, /*do_it=*/true);
+  LOG_W("show: phase: DONE");
 }
 
 void
@@ -212,10 +216,13 @@ MenuViewer::commit_region(Screen::UpdateMode mode,
   // pre-paint before any non-BOOK controller takes over). Then
   // commit only the menu's top strip. Book content below stays on
   // display untouched.
+  LOG_W("commit_region: phase: page.paint_to_active_target");
   page.paint_to_active_target(clear_screen, do_it);
+  LOG_W("commit_region: phase: screen.update_region");
   screen.update_region(Pos(0, 0),
                        Dim(Screen::get_width(), region_height),
                        mode);
+  LOG_W("commit_region: phase: DONE");
 }
 
 #if (INKPLATE_6PLUS || TOUCH_TRIAL)
