@@ -236,6 +236,12 @@ BooksDirController::show_last_book()
         "\"%s\" could not be opened. Returning to the library. "
         "Pick another book to continue.",
         book_title.c_str());
+
+      // Tell enter() to skip the menu strip paint so this alert
+      // isn't immediately overwritten. has_pending_transition()
+      // doesn't fire on this path (we did NOT call set_controller),
+      // so the strip-skip needs an additional signal.
+      last_book_open_failed = true;
     }
   }
 }
@@ -334,7 +340,7 @@ BooksDirController::enter()
     // its own page; the books-dir UI under the strip is about to
     // be replaced wholesale. Painting the strip here would be
     // wasted work even if it didn't deadlock.
-    if (!app_controller.has_pending_transition()) {
+    if (!app_controller.has_pending_transition() && !last_book_open_failed) {
       // Paint the option menu as a persistent header strip on top
       // of the just-rendered books area. The books viewer's
       // first_entry_ypos was sized using BooksDirViewer::
@@ -356,6 +362,12 @@ BooksDirController::enter()
       assert(menu_viewer.get_region_height() == BooksDirViewer::get_header_height());
     }
   #endif
+
+  // Consume the one-shot strip-suppression flag. The next enter()
+  // for any reason (user tap, navigation back, etc.) gets the
+  // normal strip paint. Cleared HERE rather than at the top of
+  // enter() so the gate above can read its current value.
+  last_book_open_failed = false;
 }
 
 void

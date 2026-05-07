@@ -308,6 +308,19 @@ BookController::open_book_file(
       // tight) — that's fine, foreground render still works and
       // is_active() returns false so show_and_capture skips the
       // residency request.
+      //
+      // INVARIANT: from this point until BookController::enter
+      // begins painting (i.e. through the rest of open_book_file's
+      // unwind, the launch() handshake, and any caller code that
+      // runs between set_controller(BOOK) returning and the run
+      // loop dispatching enter), NO FOREGROUND PANEL WRITES are
+      // safe in the current controller — the pre-paint pthread is
+      // live and holds the panel's render lock for any in-flight
+      // ScopedRenderTarget. The Belgariade wedge was a forgotten
+      // option_controller.show_menu() in BooksDirController::enter
+      // that ran after show_last_book returned and deadlocked on
+      // exactly this contention. New callers MUST audit any panel
+      // writes that follow set_controller(BOOK).
       LOG_W("open_book_file: phase: page_cache.start");
       if (page_cache.start()) {
         // Phase C warm-wake hydration: if the just-opened book
