@@ -22,11 +22,42 @@ no_mem()
 }
 
 Page::Page() :
-  compute_mode(ComputeMode::DISPLAY), 
+  compute_mode(ComputeMode::DISPLAY),
   screen_is_full(false)
 {
   clear_display_list();
   clear_line_list();
+}
+
+Page::Format
+Page::make_body_format(int16_t font_idx,
+                      int8_t  font_size,
+                      int16_t screen_top,
+                      int16_t screen_bottom)
+{
+  return Page::Format{
+    .line_height_factor = 0.95,
+    .font_index         = font_idx,
+    .font_size          = font_size,
+    .indent             = 0,
+    .margin_left        = 0,
+    .margin_right       = 0,
+    .margin_top         = 0,
+    .margin_bottom      = 0,
+    .screen_left        = 10,
+    .screen_right       = 10,
+    .screen_top         = screen_top,
+    .screen_bottom      = screen_bottom,
+    .width              = 0,
+    .height             = 0,
+    .vertical_align     = 0,
+    .trim               = true,
+    .pre                = false,
+    .font_style         = Fonts::FaceStyle::NORMAL,
+    .align              = CSS::Align::LEFT,
+    .text_transform     = CSS::TextTransform::NONE,
+    .display            = CSS::Display::INLINE
+  };
 }
 
 void 

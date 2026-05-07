@@ -846,29 +846,7 @@ PageLocs::build_page_locs(int16_t itemref_index)
       page_top              = title_font->get_chars_height(book_viewer.TITLE_FONT_SIZE) + 10;
     }
 
-    Page::Format fmt = {
-      .line_height_factor = 0.95,
-      .font_index         = idx,
-      .font_size          = font_size,
-      .indent             = 0,
-      .margin_left        = 0,
-      .margin_right       = 0,
-      .margin_top         = 0,
-      .margin_bottom      = 0,
-      .screen_left        = 10,
-      .screen_right       = 10,
-      .screen_top         = page_top,
-      .screen_bottom      = page_bottom,
-      .width              = 0,
-      .height             = 0,
-      .vertical_align     = 0,
-      .trim               = true,
-      .pre                = false,
-      .font_style         = Fonts::FaceStyle::NORMAL,
-      .align              = CSS::Align::LEFT,
-      .text_transform     = CSS::TextTransform::NONE,
-      .display            = CSS::Display::INLINE
-    };
+    Page::Format fmt = Page::make_body_format(idx, font_size, page_top, page_bottom);
 
     // RAII for the DOM and the PageLocsInterp so they get freed on
     // every return path — including stop_document mid-build, an
