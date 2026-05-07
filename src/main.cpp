@@ -212,7 +212,7 @@
         #endif
 
         if (!nvs_mgr_res) {
-          msg_viewer.show(MsgViewer::MsgType::ALERT, false, true, "Hardware Problem!",
+          msg_viewer.show_alert_fatal( "Hardware Problem!",
             "Failed to initialise NVS Flash. Entering Deep Sleep. " MSG
           );
 
@@ -221,7 +221,7 @@
         }
     
         if (inkplate_err) {
-          msg_viewer.show(MsgViewer::MsgType::ALERT, false, true, "Hardware Problem!",
+          msg_viewer.show_alert_fatal( "Hardware Problem!",
             "Unable to initialize the InkPlate drivers. Entering Deep Sleep. " MSG
           );
           ESP::delay(500);
@@ -229,7 +229,7 @@
         }
 
         if (config_err) {
-          msg_viewer.show(MsgViewer::MsgType::ALERT, false, true, "Configuration Problem!",
+          msg_viewer.show_alert_fatal( "Configuration Problem!",
             "Unable to read/save configuration file. Entering Deep Sleep. " MSG
           );
           ESP::delay(500);
@@ -242,7 +242,7 @@
         // and avoids replacing the user's wallpaper with a generic
         // placeholder for no reason.
         if (!SessionState::is_warm_wake()) {
-          msg_viewer.show(MsgViewer::MsgType::INFO, false, true, "Starting", "One moment please...");
+          msg_viewer.show_info_fullscreen( "Starting", "One moment please...");
         }
 
         books_dir_controller.setup();
@@ -251,7 +251,7 @@
       }
       else {
         LOG_E("Font loading error.");
-        msg_viewer.show(MsgViewer::MsgType::ALERT, false, true, "Font Loading Problem!",
+        msg_viewer.show_alert_fatal( "Font Loading Problem!",
           "Unable to read required fonts. Entering Deep Sleep. " MSG
         );
         ESP::delay(500);
@@ -370,7 +370,7 @@
       #endif
 
       if (config_err) {
-        msg_viewer.show(MsgViewer::MsgType::ALERT, false, true, "Configuration Problem!",
+        msg_viewer.show_alert_fatal( "Configuration Problem!",
           "Unable to read/save configuration file. Entering Deep Sleep. Press " MSG " to restart."
         );
         sleep(10);
@@ -386,7 +386,7 @@
       #endif
     }
     else {
-      msg_viewer.show(MsgViewer::MsgType::ALERT, false, true, "Font Loading Problem!",
+      msg_viewer.show_alert_fatal( "Font Loading Problem!",
         "Unable to load default fonts."
       );
 

@@ -245,7 +245,7 @@ usb_drive_mode()
       default:
         step = "unknown"; break;
     }
-    msg_viewer.show(MsgViewer::MsgType::ALERT, false, true,
+    msg_viewer.show_alert_fatal(
                     "USB Drive Mode failed",
                     "Init failed at: %s (esp_err=%d). The device will "
                     "continue normally; please try again.",
@@ -268,18 +268,12 @@ init_nvs()
   // they're about to overwrite.
   #if EPUB_INKPLATE_BUILD
     if (nvs_mgr.setup(true)) {
-      msg_viewer.show(
-        MsgViewer::MsgType::BOOK,
-        false,
-        false,
+      msg_viewer.show_book_loading(
         "E-Books History Cleared",
         "The E-Books History has been initialized with success.");
     }
     else {
-      msg_viewer.show(
-        MsgViewer::MsgType::BOOK,
-        false,
-        false,
+      msg_viewer.show_book_loading(
         "E-Books History Clearing Error",
         "The E-Books History has not been initialized properly. "
         "Potential hardware problem or software framework issue.");
@@ -606,7 +600,7 @@ OptionController::dispatch_to_sub_state(
         // `default_font` on failure so config.put writes the
         // working previous value.
         if (!fonts.adjust_default_font(default_font)) {
-          msg_viewer.show(MsgViewer::MsgType::ALERT, false, false,
+          msg_viewer.show_alert(
                           "Font Load Failed",
                           "Could not load the selected default font. "
                           "The previous font is still in use.");
@@ -652,8 +646,7 @@ OptionController::dispatch_to_sub_state(
 
   #if EPUB_INKPLATE_BUILD
     else if (wait_for_key_after_wifi) {
-      msg_viewer.show(MsgViewer::MsgType::INFO,
-                      false, true,
+      msg_viewer.show_info_fullscreen(
                       "Restarting",
                       "The device is now restarting. Please wait.");
       wait_for_key_after_wifi = false;
@@ -668,8 +661,7 @@ OptionController::dispatch_to_sub_state(
       // mid-write. exit_via_restart shows a "Restarting" splash and
       // calls esp_restart(); the next boot mounts a fresh FATFS and
       // picks up any newly-uploaded files via the standard refresh.
-      msg_viewer.show(MsgViewer::MsgType::INFO,
-                      false, true,
+      msg_viewer.show_info_fullscreen(
                       "Restarting",
                       "Disconnecting USB drive. Please wait.");
       wait_for_key_after_usb = false;

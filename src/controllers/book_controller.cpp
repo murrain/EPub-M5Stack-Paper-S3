@@ -270,7 +270,7 @@ BookController::open_book_file(
   // ~700 ms is the worst possible UX on resume.
   const bool warm = SessionState::is_warm_wake();
   if (!warm) {
-    msg_viewer.show(MsgViewer::MsgType::BOOK, false, false, "Loading a book",
+    msg_viewer.show_book_loading( "Loading a book",
        "The book \" %s \" is loading. Please wait.", book_title.c_str());
   }
   // Consume the warm-wake budget here — subsequent book opens during

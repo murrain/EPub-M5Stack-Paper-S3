@@ -39,9 +39,7 @@ static int JPEGDraw(JPEGDRAW *pDraw)
     if (!waiting_msg_shown && ((ESP::millis() - load_start_time) > 2000)) {
       waiting_msg_shown = true;
 
-      msg_viewer.show(
-        MsgViewer::MsgType::INFO,
-        false, false,
+      msg_viewer.show_info(
         "Retrieving Image",
         "The application is retrieving image(s) from the e-book file. Please wait."
       );
@@ -126,10 +124,8 @@ static int out_func (       /* Returns 1 to continue, 0 to abort */
     if (!waiting_msg_shown && ((ESP::millis() - load_start_time) > 2000)) {
       waiting_msg_shown = true;
 
-      msg_viewer.show(
-        MsgViewer::MsgType::INFO, 
-        false, false, 
-        "Retrieving Image", 
+      msg_viewer.show_info(
+        "Retrieving Image",
         "The application is retrieving image(s) from the e-book file. Please wait."
       );
     }

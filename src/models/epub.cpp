@@ -611,9 +611,7 @@ EPub::retrieve_fonts_from_css(CSS & css)
             // the specific @font-face rule rather than blamed on
             // "fonts" generally.
             LOG_D("Loading embedded font: %s", font_family.c_str());
-            msg_viewer.show(
-              MsgViewer::MsgType::INFO,
-              false, false,
+            msg_viewer.show_info(
               "Loading book",
               "Loading font: %s",
               font_family.c_str()

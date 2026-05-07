@@ -713,9 +713,7 @@ const char * EventMgr::event_str[10] = { "NONE",        "TAP",           "HOLD",
               SleepScreenViewer::show();
             #else
               screen.force_full_update();
-              msg_viewer.show(
-                MsgViewer::MsgType::INFO,
-                false, true,
+              msg_viewer.show_info_fullscreen(
                 "Deep Sleep",
                 "Timeout period exceeded (%d minutes). The device is now "
                 "entering into Deep Sleep mode. Please press the WakeUp Button to restart.",

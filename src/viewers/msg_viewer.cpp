@@ -19,11 +19,79 @@
 char MsgViewer::icon_char[7] = { 'I',  '!', 'H', 'E', 'S', 'Y', '!' };
 
 void MsgViewer::show(
-  MsgType msg_type, 
-  bool press_a_key, 
+  MsgType msg_type,
+  bool press_a_key,
   bool clear_screen,
-  const char * title, 
+  const char * title,
   const char * fmt_str, ...)
+{
+  va_list args;
+  va_start(args, fmt_str);
+  vshow(msg_type, press_a_key, clear_screen, title, fmt_str, args);
+  va_end(args);
+}
+
+void MsgViewer::show_alert(const char * title, const char * fmt_str, ...)
+{
+  va_list args;
+  va_start(args, fmt_str);
+  vshow(MsgType::ALERT, /*press_a_key=*/false, /*clear_screen=*/false,
+        title, fmt_str, args);
+  va_end(args);
+}
+
+void MsgViewer::show_alert_fatal(const char * title, const char * fmt_str, ...)
+{
+  va_list args;
+  va_start(args, fmt_str);
+  vshow(MsgType::ALERT, /*press_a_key=*/false, /*clear_screen=*/true,
+        title, fmt_str, args);
+  va_end(args);
+}
+
+void MsgViewer::show_info(const char * title, const char * fmt_str, ...)
+{
+  va_list args;
+  va_start(args, fmt_str);
+  vshow(MsgType::INFO, /*press_a_key=*/false, /*clear_screen=*/false,
+        title, fmt_str, args);
+  va_end(args);
+}
+
+void MsgViewer::show_info_fullscreen(const char * title, const char * fmt_str, ...)
+{
+  va_list args;
+  va_start(args, fmt_str);
+  vshow(MsgType::INFO, /*press_a_key=*/false, /*clear_screen=*/true,
+        title, fmt_str, args);
+  va_end(args);
+}
+
+void MsgViewer::show_book_loading(const char * title, const char * fmt_str, ...)
+{
+  va_list args;
+  va_start(args, fmt_str);
+  vshow(MsgType::BOOK, /*press_a_key=*/false, /*clear_screen=*/false,
+        title, fmt_str, args);
+  va_end(args);
+}
+
+void MsgViewer::show_confirm(const char * title, const char * fmt_str, ...)
+{
+  va_list args;
+  va_start(args, fmt_str);
+  vshow(MsgType::CONFIRM, /*press_a_key=*/true, /*clear_screen=*/false,
+        title, fmt_str, args);
+  va_end(args);
+}
+
+void MsgViewer::vshow(
+  MsgType msg_type,
+  bool press_a_key,
+  bool clear_screen,
+  const char * title,
+  const char * fmt_str,
+  va_list args)
 {
   char buff[200];
 
@@ -31,10 +99,7 @@ void MsgViewer::show(
 
   if (page.get_compute_mode() == Page::ComputeMode::LOCATION) return; // Cannot be used durint location computation
 
-  va_list args;
-  va_start(args, fmt_str);
   vsnprintf(buff, 200, fmt_str, args);
-  va_end(args);
 
   Page::Format fmt = {
     .line_height_factor = 1.0,

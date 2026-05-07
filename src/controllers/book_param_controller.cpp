@@ -134,8 +134,7 @@ revert_to_defaults()
 
   book_params->save();
 
-  msg_viewer.show(MsgViewer::MsgType::INFO,
-                  false, false,
+  msg_viewer.show_info(
                   "E-book parameters reverted",
                   "E-book parameters reverted to default values.");
 
@@ -181,7 +180,7 @@ books_list()
 static void
 delete_book()
 {
-  msg_viewer.show(MsgViewer::MsgType::CONFIRM, true, false,
+  msg_viewer.show_confirm(
                   "Delete e-book", 
                   "The e-book \"%s\" will be deleted. Are you sure?", 
                   epub.get_title());
@@ -227,8 +226,7 @@ jump_to_page()
   int16_t page_count = page_locs.get_page_count();
 
   if (page_count <= 0) {
-    msg_viewer.show(MsgViewer::MsgType::INFO,
-                    false, false,
+    msg_viewer.show_info(
                     "Jump to Page",
                     "Pages are still being computed. Please wait.");
     return;
@@ -349,7 +347,7 @@ BookParamController::dispatch_to_sub_state(
       // unloadable index.
       if (old_font != font) {
         if (!fonts.adjust_default_font(font)) {
-          msg_viewer.show(MsgViewer::MsgType::ALERT, false, false,
+          msg_viewer.show_alert(
                           "Font Load Failed",
                           "Could not load the selected font. "
                           "The previous font is still in use.");
@@ -402,8 +400,7 @@ BookParamController::dispatch_to_sub_state(
           app_controller.set_controller(AppController::Ctrl::BOOK);
         }
         else {
-          msg_viewer.show(MsgViewer::MsgType::INFO,
-                          false, false,
+          msg_viewer.show_info(
                           "Jump to Page",
                           "Page %d could not be found.",
                           page_nav_viewer.get_value());
@@ -466,7 +463,7 @@ BookParamController::dispatch_to_sub_state(
         }
       }
       else {
-        msg_viewer.show(MsgViewer::MsgType::INFO, false, false,
+        msg_viewer.show_info(
                         "Canceled", "The e-book was not deleted.");
       }
       delete_current_book = false;
@@ -474,8 +471,7 @@ BookParamController::dispatch_to_sub_state(
   }
   #if EPUB_INKPLATE_BUILD
     else if (wait_for_key_after_wifi) {
-      msg_viewer.show(MsgViewer::MsgType::INFO,
-                      false, true,
+      msg_viewer.show_info_fullscreen(
                       "Restarting",
                       "The device is now restarting. Please wait.");
       wait_for_key_after_wifi = false;
