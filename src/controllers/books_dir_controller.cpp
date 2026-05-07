@@ -281,9 +281,28 @@ BooksDirController::enter()
   // stop_document also deep-cleans PageLocs::item_info, which would
   // otherwise hold dangling css_list pointers into the now-freed
   // EPub::css_cache.
+  //
+  // Honor stop_document's bool return: false means the retriever
+  // didn't surface within STOP_DOCUMENT_TIMEOUT_MS and is still
+  // alive. Calling close_file() under it would free item_info /
+  // opf / css / unzip state that the retriever next dereferences
+  // → LoadProhibited UAF observed after a "menu→book→menu→book→
+  // menu" sequence on Belgariade-class books where get_item_at_
+  // index can spend several seconds in unzip+pugixml+retrieve_css
+  // with no abort checks. Leaving the EPUB state resident is
+  // strictly better than crashing — the retriever will eventually
+  // surface and idle naturally; the next book-open's close-then-
+  // open path can re-attempt the teardown when it's safe.
   page_cache.stop();
-  page_locs.stop_document();
-  epub.close_file();
+  if (page_locs.stop_document()) {
+    epub.close_file();
+  }
+  else {
+    LOG_E("BooksDirController::enter: stop_document timeout, "
+          "skipping epub.close_file to avoid retriever UAF. "
+          "Book state remains resident; will be cleaned up when "
+          "the retriever next surfaces.");
+  }
 
   config.get(Config::Ident::DIR_VIEW, &viewer_id);
   const char *view = (viewer_id == LINEAR_VIEWER) ? "linear" :

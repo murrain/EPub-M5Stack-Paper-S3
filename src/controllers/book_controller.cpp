@@ -296,7 +296,22 @@ BookController::open_book_file(
     LOG_W("open_book_file: phase: page_cache.stop");
     page_cache.stop();
     LOG_W("open_book_file: phase: page_locs.stop_document");
-    page_locs.stop_document();
+    if (!page_locs.stop_document()) {
+      // Retriever didn't surface within STOP_DOCUMENT_TIMEOUT_MS.
+      // The follow-up epub.open_file would call close_file
+      // internally (because file_is_open is true from the previous
+      // book), which would free the still-live retriever's state —
+      // same UAF the books-dir teardown path now guards against.
+      // Return false so BookController::open_book_file's caller
+      // (show_last_book / input_event TAP) gets the alert path
+      // instead of crashing. The retriever continues running with
+      // the previous book's state; the next attempt to open a new
+      // book will retry the stop and likely succeed by then.
+      LOG_E("open_book_file: stop_document timeout, refusing to "
+            "open new book to avoid retriever UAF on the previous "
+            "book's state. Try again in a moment.");
+      return false;
+    }
   }
 
   LOG_W("open_book_file: phase: epub.open_file");

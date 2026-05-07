@@ -50,10 +50,27 @@ struct RetrieveQueueData {
 };
 
 // Foreground-side bounded waits on the retriever's reply queues.
-// Sized as broken-book detectors, not expected waits — see the
-// commentary at the call sites and at mgr_reply_recv_timed_ms.
+// Sized as broken-book detectors, not expected waits.
+//
+// stop_document needs a generous budget: the retriever's only abort
+// checks are cooperative_check (top of build_page_locs while-loop,
+// at every page boundary) and should_abort_inner (every ~64 chars
+// inside build_pages_recurse). It does NOT check abort inside
+// epub.get_item_at_index — which calls unzip.get_file (zip-stream
+// + decompress on a multi-MB file from SD), pugixml::load_buffer,
+// and retrieve_css (CSS parse, possible @font-face FreeType
+// loads). On a large book like Belgariade those phases can take
+// well over 5 s individually with no chance to observe the abort
+// flag. The 5 s ceiling caused stop_document to return "success"
+// (void) while the retriever was still alive, then BooksDirCtrl::
+// enter's close_file freed the EPUB state under it → LoadProhibited
+// UAF observed in a "menu→book→menu→book→menu" sequence. 30 s
+// is generous enough for any healthy retriever to surface from
+// the worst-case slow path; if it doesn't, something is genuinely
+// wedged and the bool return now lets the caller decide whether
+// it's safe to free state.
 static constexpr uint32_t RETRIEVE_ASAP_TIMEOUT_MS  = 10000;  // 10 s
-static constexpr uint32_t STOP_DOCUMENT_TIMEOUT_MS  =  5000;  //  5 s
+static constexpr uint32_t STOP_DOCUMENT_TIMEOUT_MS  = 30000;  // 30 s
 
 #if EPUB_LINUX_BUILD
   #include <chrono>
@@ -986,12 +1003,12 @@ PageLocs::retrieve_asap(int16_t itemref_index)
   return true;
 }
 
-void
+bool
 PageLocs::stop_document()
 {
   StateQueueData state_queue_data;
 
-  LOG_D("start_new_document: Sending STOP");
+  LOG_D("stop_document: Sending STOP");
   state_queue_data = {
     .req           = StateReq::STOP,
     .itemref_index = 0,
@@ -1001,27 +1018,24 @@ PageLocs::stop_document()
 
   MgrQueueData mgr_queue_data;
   LOG_D("==> Waiting for STOPPED... <==");
-  // stopped_queue carries only STOPPED; ASAP_READY replies go to
-  // asap_queue. No reply-type mismatch is possible — the receive
-  // either delivers a STOPPED or blocks forever (which would
-  // indicate a missing send, not a wrong-type send).
-  //
-  // Bounded wait for the same reason retrieve_asap is bounded: a
-  // wedged retriever (FreeType infinite loop, etc.) would otherwise
-  // never confirm STOPPED. STOP_DOCUMENT_TIMEOUT_MS is short — by
-  // the time we reach stop_document the retriever has either
-  // observed the aborting flag (cooperative_check yields every page
-  // and a few hundred milliseconds is the worst-case build_pages_
-  // recurse settling time on a healthy item) or it's hung. Any
-  // longer just delays the foreground without changing the
-  // outcome.
+  // Bounded wait, but generous (30 s). The retriever's abort checks
+  // are cooperative_check + should_abort_inner — both inside
+  // build_pages_recurse — and absent from epub.get_item_at_index's
+  // unzip / pugixml / retrieve_css path. On a slow SD or a large
+  // chapter that whole step can take several seconds with no
+  // chance to observe the abort flag. A 5 s timeout proved
+  // unsafe: stop_document returned "success" while the retriever
+  // was still alive, then BooksDirController::enter's close_file
+  // freed item_info / opf / css / unzip state under it →
+  // LoadProhibited UAF on the retriever's next dereference. Now
+  // returns bool: caller MUST honor a false return by skipping
+  // any state-freeing teardown.
   if (!mgr_reply_recv_timed_ms(stopped_queue, mgr_queue_data,
                               STOP_DOCUMENT_TIMEOUT_MS)) {
-    LOG_E("stop_document: %u ms timeout. Retriever did not confirm "
-          "STOPPED — proceeding anyway. Subsequent operations may be "
-          "unreliable until power cycle.",
+    LOG_E("stop_document: %u ms timeout. Retriever still alive — "
+          "callers must skip state teardown to avoid UAF.",
           (unsigned) STOP_DOCUMENT_TIMEOUT_MS);
-    return;
+    return false;
   }
   LOG_D("-> %s <-", (mgr_queue_data.req == MgrReq::STOPPED) ? "STOPPED" : "?");
 
@@ -1038,6 +1052,7 @@ PageLocs::stop_document()
   // never partially-cleaned-while-someone-is-reading".
   std::scoped_lock guard(mutex);
   epub.clear_item_data(item_info);
+  return true;
 }
 
 void
