@@ -103,10 +103,18 @@ static constexpr int16_t FAST_BUDGET_COST = 2;
 static inline void run_update(EpdDrawMode mode, int temperature, const char * mode_name)
 {
   (void)mode_name;
+  // Diagnostic: log right before AND after epd_hl_update_screen so a
+  // hardware wedge inside the LCD driver is unambiguous in serial.
+  // Without the pre-call line, EPD_LOG_UPDATE_TIMING (post-call only)
+  // looks identical between "didn't call" and "called but never
+  // returned." Tracking down a freeze the user couldn't otherwise
+  // localize.
+  ESP_LOGW("screen", "run_update: calling epd_hl_update_screen (%s)", mode_name);
 #ifdef EPD_LOG_UPDATE_TIMING
   int64_t t0 = esp_timer_get_time();
 #endif
   epd_hl_update_screen(&s_hl, mode, temperature);
+  ESP_LOGW("screen", "run_update: epd_hl_update_screen returned (%s)", mode_name);
 #ifdef EPD_LOG_UPDATE_TIMING
   int64_t dt_us = esp_timer_get_time() - t0;
   ESP_LOGI("screen", "update %s: %lld us", mode_name, (long long)dt_us);
@@ -116,6 +124,7 @@ static inline void run_update(EpdDrawMode mode, int temperature, const char * mo
 void Screen::update(UpdateMode mode)
 {
   if (!s_epd_initialized) return;
+  ESP_LOGW("screen", "Screen::update entry (mode=%d)", (int) mode);
 
   // Phase A's assert(s_active_framebuffer == s_framebuffer) was
   // removed to allow the BookController cache-hit display path
@@ -248,6 +257,8 @@ void Screen::panel_clear()
 void Screen::update_region(Pos pos, Dim dim, UpdateMode mode)
 {
   if (!s_epd_initialized) return;
+  ESP_LOGW("screen", "Screen::update_region entry (mode=%d %d,%d %dx%d)",
+           (int) mode, pos.x, pos.y, dim.width, dim.height);
 
   // Force-full and warm-wake-clear are TRANSACTIONAL with the panel
   // image: they expect the next update to drive the full waveform
@@ -304,10 +315,12 @@ void Screen::update_region(Pos pos, Dim dim, UpdateMode mode)
   }
   (void) label;
 
+  ESP_LOGW("screen", "update_region: calling epd_hl_update_area (%s)", label);
 #ifdef EPD_LOG_UPDATE_TIMING
   int64_t t0 = esp_timer_get_time();
 #endif
   epd_hl_update_area(&s_hl, epd_mode, s_temperature, area);
+  ESP_LOGW("screen", "update_region: epd_hl_update_area returned (%s)", label);
 #ifdef EPD_LOG_UPDATE_TIMING
   int64_t dt_us = esp_timer_get_time() - t0;
   ESP_LOGI("screen", "update_region %s [%d,%d %dx%d]: %lld us",

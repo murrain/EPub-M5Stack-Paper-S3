@@ -395,8 +395,12 @@ Page::emit_display_list(bool clear_screen, bool do_it)
 void
 Page::paint_impl(Screen::UpdateMode mode, bool clear_screen, bool do_it)
 {
+  LOG_W("paint_impl: emit_display_list (mode=%d clear=%d do_it=%d)",
+        (int) mode, (int) clear_screen, (int) do_it);
   emit_display_list(clear_screen, do_it);
+  LOG_W("paint_impl: screen.update");
   screen.update(mode);
+  LOG_W("paint_impl: DONE");
 }
 
 // Off-screen paint: emit only. Caller (PageCache pre-paint task)
