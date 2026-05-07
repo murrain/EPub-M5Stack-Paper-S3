@@ -9,6 +9,8 @@
 
 #include "screen.hpp"
 
+#include <cstdarg>
+
 /**
  * @brief Message presentation class
  * 
@@ -19,6 +21,17 @@ class MsgViewer {
 
   private:
     static constexpr char const * TAG = "MsgViewer";
+
+    // Single rendering implementation. Public show() and typed
+    // wrappers all forward here. Takes a va_list so wrappers can
+    // forward their variadic args without a second formatting step.
+    void vshow(
+      MsgType msg_type,
+      bool    press_a_key,
+      bool    clear_screen,
+      const char * title,
+      const char * fmt_str,
+      va_list      args);
 
     uint16_t width;
     static constexpr uint16_t HEIGHT  = 300;
@@ -45,13 +58,62 @@ class MsgViewer {
     enum MsgType { INFO, ALERT, BUG, BOOK, WIFI, NTP_CLOCK, CONFIRM };
     static char icon_char[7];
 
+    // Lowest-level entry point. Direct callers are now rare — the
+    // typed wrappers below cover ~80 % of the message shapes used
+    // in the codebase. Kept public for the WIFI/NTP/edge cases that
+    // don't fit the wrapper presets.
+    //
+    // Audit 03-viewers.md flagged this as a drift hazard: 30+ call
+    // sites with positional bools, and one (option_controller.cpp:609)
+    // had already drifted to (false, false) where every neighbor used
+    // (false, true). The named wrappers below force the common bool
+    // combos through one site each, making future drift impossible
+    // for the common cases.
     void show(
-      MsgType msg_type, 
-      bool press_a_key, 
+      MsgType msg_type,
+      bool press_a_key,
       bool clear_screen,
-      const char * title, 
+      const char * title,
       const char * fmt_str, ...);
-    
+
+    // ----- Typed wrappers for the common message shapes. -----
+    //
+    // Naming convention: each wrapper is named for the bool combo
+    // it sets, NOT for the caller's intent. This avoids the trap
+    // where a wrapper named after a use case (e.g. "fatal") drifts
+    // when reused for a structurally identical but semantically
+    // different case (e.g. recoverable error that returns to
+    // library).
+    //
+    //   show_<kind>            : in-session overlay (clear_screen=false,
+    //                            press_a_key=false). Painted on top of
+    //                            existing content; brief.
+    //   show_<kind>_fullscreen : full-screen splash (clear_screen=true,
+    //                            press_a_key=false). Boot errors,
+    //                            recoverable errors that return to a
+    //                            different controller, restart prompts.
+    //   show_confirm           : CONFIRM with the OK/cancel handshake
+    //                            (press_a_key=true, clear_screen=false).
+
+    /** ALERT, in-session overlay. clear_screen=false, press_a_key=false. */
+    void show_alert(const char * title, const char * fmt_str, ...);
+
+    /** ALERT, fullscreen takeover. (false, true). Boot/hardware/config errors,
+     *  recoverable errors that bounce the user to a different controller. */
+    void show_alert_fullscreen(const char * title, const char * fmt_str, ...);
+
+    /** INFO, in-session overlay. (false, false). Most common shape. */
+    void show_info(const char * title, const char * fmt_str, ...);
+
+    /** INFO, fullscreen confirmation banner. (false, true). */
+    void show_info_fullscreen(const char * title, const char * fmt_str, ...);
+
+    /** BOOK splash for "Loading a book..." style messages. (false, false). */
+    void show_book_loading(const char * title, const char * fmt_str, ...);
+
+    /** CONFIRM dialog with OK/cancel. (true, false). Caller drives confirm() afterwards. */
+    void show_confirm(const char * title, const char * fmt_str, ...);
+
     bool confirm(const EventMgr::Event & event, bool & ok);
 
     //void show_progress(const char * title, ...);

@@ -198,10 +198,7 @@ CommonActions::about()
   // is immediately overwritten. hint_shown stays true until the
   // next MenuViewer::show resets it (DIR re-entry or post-form),
   // which is harmless — the flag has no direct display effect.
-  msg_viewer.show(
-    MsgViewer::MsgType::BOOK,
-    false,
-    false,
+  msg_viewer.show_book_loading(
     "About EPub-InkPlate",
     "EPub EBook Reader Version %s for the InkPlate e-paper display devices. "
     "This application was made by Guy Turcotte, Quebec, QC, Canada, "
