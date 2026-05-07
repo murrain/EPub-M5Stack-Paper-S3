@@ -56,6 +56,28 @@ class Page
     };
 
     /**
+     * @brief Build a Page::Format for body-text rendering.
+     *
+     * Triple-coupled previously across BookViewer::build_page_at,
+     * PageLocs::build_page_locs, and PageCache::render_page_into —
+     * the page_cache.cpp comment explicitly noted "kept in lockstep
+     * manually" and PR1 had to fix a silent page_bottom drift
+     * between the paginator and the renderers. This factory is
+     * the one place the body-text format is constructed; if a
+     * future tweak (say, indent or line_height_factor) needs to
+     * change, it changes here once.
+     *
+     * Variable inputs: font index, font size, top/bottom screen
+     * margins (computed per-call from font metrics + show_title).
+     * Everything else is fixed (left/right margins 10 px, align
+     * left, line_height_factor 0.95, etc.).
+     */
+    static Format make_body_format(int16_t font_index,
+                                   int8_t  font_size,
+                                   int16_t screen_top,
+                                   int16_t screen_bottom);
+
+    /**
      * @brief Compute mode
      * 
      * Used to select the level of processing made by the Page class to help

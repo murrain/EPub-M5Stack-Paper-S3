@@ -678,11 +678,12 @@ bool render_page_into(uint8_t * fb, const PageLocs::PageId & page_id)
     return false;
   }
 
-  // fmt construction mirrors book_viewer.cpp::build_page_at
-  // (lines 53-105 there). Kept in lockstep manually rather than
-  // factored out — refactoring build_page_at to share the fmt
-  // builder would touch the foreground render hot path, and Phase
-  // B is not the right scope for that.
+  // fmt construction now goes through Page::make_body_format,
+  // which is the single source of truth for the body-text Page::
+  // Format. The previous triple-coupling (this file + book_viewer
+  // + page_locs all maintained their own copy in lockstep) caused
+  // a silent page_bottom drift between the paginator and renderers
+  // (audit 05-code-quality.md finding #1 / fixed in PR1).
   Font * bottom_font = fonts.get(ScreenBottom::FONT);
   int16_t page_bottom =
     bottom_font->get_chars_height(ScreenBottom::FONT_SIZE) + 15;
@@ -703,29 +704,8 @@ bool render_page_into(uint8_t * fb, const PageLocs::PageId & page_id)
   if (font_idx == -1) font_idx = 3;
   int8_t font_size = epub.get_book_format_params()->font_size;
 
-  Page::Format fmt = {
-    .line_height_factor = 0.95,
-    .font_index         = (int8_t) font_idx,
-    .font_size          = font_size,
-    .indent             = 0,
-    .margin_left        = 0,
-    .margin_right       = 0,
-    .margin_top         = 0,
-    .margin_bottom      = 0,
-    .screen_left        = 10,
-    .screen_right       = 10,
-    .screen_top         = page_top,
-    .screen_bottom      = page_bottom,
-    .width              = 0,
-    .height             = 0,
-    .vertical_align     = 0,
-    .trim               = true,
-    .pre                = false,
-    .font_style         = Fonts::FaceStyle::NORMAL,
-    .align              = CSS::Align::LEFT,
-    .text_transform     = CSS::TextTransform::NONE,
-    .display            = CSS::Display::INLINE
-  };
+  Page::Format fmt = Page::make_body_format(font_idx, font_size,
+                                            page_top, page_bottom);
 
   DOM dom;
   // The Page singleton is shared with book_viewer's foreground
