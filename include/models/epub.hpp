@@ -98,6 +98,30 @@ class EPub
     void                  open_params(const std::string    & epub_filename);
     bool                    open_file(const std::string    & epub_filename);
     bool                   close_file();
+
+    /**
+     * @brief Quiesce the live book session before tearing down state.
+     *
+     * Stops the pre-paint pthread and waits for the page-locs
+     * retriever to confirm STOPPED. Returns true if BOTH are
+     * provably idle — at that point it's safe to free EPUB state
+     * (close_file, fonts.clear, font swap), pause for sleep, or
+     * mutate format params. Returns false if page_locs.stop_
+     * document timed out, meaning the retriever is still alive
+     * and may still hold references into item_info / opf / css /
+     * unzip / Font*. Callers MUST honor a false return by
+     * skipping any teardown that would free those — close_file,
+     * font cache mutation, page_locs.clear, or open_file (which
+     * close-then-opens internally). Without that gate, the
+     * retriever's next dereference page-faults (LoadProhibited
+     * UAF observed in the menu→book→menu→book→menu sequence).
+     *
+     * Lock-order: page_cache (pre-paint) MUST stop first; it
+     * holds book_viewer.get_mutex during render and dereferences
+     * page_locs.item_info, so freeing those before the pre-paint
+     * task is confirmed idle would UAF mid-render.
+     */
+    static bool quiesce_book_session();
     Image *                 get_image(std::string          & fname,
                                       bool                   load         );
     char*               retrieve_file(const char           * fname, 

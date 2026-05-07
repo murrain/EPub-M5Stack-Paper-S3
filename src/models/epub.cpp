@@ -8,6 +8,7 @@
 #include "models/fonts.hpp"
 #include "models/books_dir.hpp"
 #include "models/config.hpp"
+#include "models/page_cache.hpp"
 #include "models/page_locs.hpp"
 #include "models/image_factory.hpp"
 #include "viewers/msg_viewer.hpp"
@@ -1043,7 +1044,22 @@ EPub::close_file()
   return true;
 }
 
-const char * 
+bool
+EPub::quiesce_book_session()
+{
+  // Lock-order: pre-paint stops first. It holds book_viewer.get_
+  // mutex during render and dereferences page_locs.item_info, so
+  // freeing those before the pre-paint task is confirmed idle
+  // would UAF mid-render.
+  page_cache.stop();
+
+  // Then the page-locs retriever. Returns false on timeout —
+  // surfaces back through this function so callers can decide
+  // whether to skip teardown.
+  return page_locs.stop_document();
+}
+
+const char *
 EPub::get_meta(const std::string & name)
 {
   if (!file_is_open) return nullptr;
