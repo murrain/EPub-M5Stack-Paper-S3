@@ -14,7 +14,7 @@ Page::Format make_fmt(int8_t           font_index,
                       int16_t          font_size,
                       Fonts::FaceStyle style,
                       CSS::Align       align,
-                      double           line_height_factor)
+                      float            line_height_factor)
 {
   Page::Format fmt = {
     .line_height_factor = line_height_factor,

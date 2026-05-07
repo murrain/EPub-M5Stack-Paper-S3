@@ -36,7 +36,7 @@ namespace
   // CenteredLayout::make_fmt takes it as a parameter; usb_msc uses
   // 1.15, this viewer uses 1.1. Both values were tuned by hand
   // for their respective content density; keep them per-viewer.
-  constexpr double LINE_HEIGHT_FACTOR = 1.1;
+  constexpr float LINE_HEIGHT_FACTOR = 1.1f;
 
   inline Page::Format make_fmt(int8_t font_index, int16_t font_size,
                                Fonts::FaceStyle style, CSS::Align align)

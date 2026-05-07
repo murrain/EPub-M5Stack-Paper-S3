@@ -30,11 +30,18 @@ namespace CenteredLayout {
   // Build a Page::Format suitable for centered full-screen text.
   // line_height_factor is the only knob that varied between
   // sleep_screen (1.1) and usb_msc (1.15); pass yours.
+  //
+  // line_height_factor is `float` (not double) to match Page::
+  // Format::line_height_factor exactly — the paper_s3 build runs
+  // with -Werror=narrowing, so passing a double through here and
+  // assigning it to a float field fails to compile. Float is also
+  // sufficient for the actual values used (one decimal of
+  // precision).
   Page::Format make_fmt(int8_t           font_index,
                         int16_t          font_size,
                         Fonts::FaceStyle style,
                         CSS::Align       align,
-                        double           line_height_factor);
+                        float            line_height_factor);
 
   // Paint `text` centered horizontally at panel-y `y`. Mutates
   // fmt.align to CENTER (the prior behavior of both private
