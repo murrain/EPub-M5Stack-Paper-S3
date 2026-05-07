@@ -929,9 +929,9 @@ volatile bool relax = false;
 void
 PageLocs::request_asap(int16_t itemref_index)
 {
-  // Same wire format as retrieve_asap, but no wait on asap_queue.
-  // The retriever services this as its next item; the foreground
-  // returns immediately so page-turn UX stays instant.
+  // Fire-and-forget: send GET_ASAP, return immediately. The eventual
+  // ASAP_READY reply lands in asap_queue with no waiter and is
+  // drained by the next retrieve_asap call (see drain loop there).
   StateQueueData state_queue_data = {
     .req           = StateReq::GET_ASAP,
     .itemref_index = itemref_index,
@@ -942,9 +942,24 @@ PageLocs::request_asap(int16_t itemref_index)
   QUEUE_SEND(state_queue, state_queue_data, 0);
 }
 
-bool 
-PageLocs::retrieve_asap(int16_t itemref_index) 
+bool
+PageLocs::retrieve_asap(int16_t itemref_index)
 {
+  // Drain any stale ASAP_READY replies that request_asap left in
+  // the queue. request_asap is fire-and-forget — the retriever
+  // still emits ASAP_READY when the requested item is built, but
+  // there's no waiter consuming it. Without this drain, the
+  // first retrieve_asap call after one or more request_asap
+  // calls would consume a stale reply for a DIFFERENT itemref
+  // and report success without actually waiting for OUR item.
+  // Non-blocking (timeout 0) so this is a fast no-op when the
+  // queue is empty.
+  MgrQueueData drain;
+  while (mgr_reply_recv_timed_ms(asap_queue, drain, 0)) {
+    LOG_D("retrieve_asap: drained stale ASAP_READY (itemref=%d)",
+          (int) drain.itemref_index);
+  }
+
   StateQueueData state_queue_data;
   state_queue_data = {
     .req           = StateReq::GET_ASAP,
