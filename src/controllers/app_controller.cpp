@@ -11,6 +11,7 @@
 #include "controllers/option_controller.hpp"
 #include "controllers/toc_controller.hpp"
 #include "controllers/event_mgr.hpp"
+#include "models/epub.hpp"
 #include "models/page_cache.hpp"
 #include "models/page_locs.hpp"
 #include "models/wake_snapshot.hpp"
@@ -219,20 +220,22 @@ AppController::going_to_deep_sleep()
   }
 
   // Now stop pre-paint, AFTER persist has snapshotted the cache.
-  // This is the same lock-order discipline used in BooksDir
-  // Controller::enter (cache → page_locs → epub) but we don't
-  // close the file here because the SleepScreenViewer painted
-  // during the leave() switch below still needs fonts alive (see
+  // Then stop the page-locs retriever so it can't write a partial
+  // .locs file concurrent with book_controller.leave's nvs/locs
+  // persistence (RetrieverTask's computation_completed save()
+  // path would otherwise race the leave handler's writes).
+  //
+  // Same lock-order discipline used elsewhere (cache → page_locs);
+  // both wrapped behind EPub::quiesce_book_session. We don't
+  // close the file here — SleepScreenViewer painted during the
+  // leave() switch below still needs fonts alive (see
   // BookController::leave's going_to_deep_sleep=true branch).
-  page_cache.stop();
-
-  // Stop the page-locations retriever before any controller writes its
-  // own state to flash. Without this, the RetrieverTask can be mid-build
-  // and emit a save() of the .locs file (page_locs.cpp computation_completed
-  // path) concurrently with book_controller.leave's nvs/locs persistence,
-  // corrupting either file. stop_document is safe to call when already
-  // idle (the STOP handler short-circuits and sends STOPPED immediately).
-  page_locs.stop_document();
+  //
+  // Bool return ignored: even on quiesce timeout, we proceed to
+  // sleep. The retriever (if still alive) gets power-cut on
+  // deep_sleep_now; any partially-written .locs would be
+  // detected and rebuilt on next wake.
+  (void) epub.quiesce_book_session();
 
   switch (current_ctrl) {
     case Ctrl::DIR:     books_dir_controller.leave(true); break;
