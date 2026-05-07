@@ -884,39 +884,53 @@ EPub::open_params(const std::string & epub_filename)
   }
 }
 
-bool 
+bool
 EPub::open_file(const std::string & epub_filename)
 {
   if (file_is_open && (current_filename == epub_filename)) return true;
   if (file_is_open) close_file();
 
+  // open_file phase logs (LOG_I, always-on). Diagnostic for a
+  // book that wedged the device on "Loading a book" with no signal
+  // of which sub-step was stuck. The last "phase:" line on the
+  // serial wire before the panel freezes tells us where to put the
+  // next watchdog. Keep these as info-level until the open path is
+  // either refactored into a state machine with explicit per-step
+  // bounds, or we're confident no book in the wild can wedge any
+  // of these phases.
+  LOG_I("open_file phase: page_locs.clear");
   page_locs.clear();
-  
+
   #if COMPUTE_SIZE
     memory_used = 0;
   #endif
 
-  LOG_D("Opening EPub file through unzip...");
+  LOG_I("open_file phase: unzip.open_zip_file");
   if (!unzip.open_zip_file(epub_filename.c_str())) {
     LOG_E("EPub open_file: Unable to open zip file: %s", epub_filename.c_str());
     return false;
   }
 
+  LOG_I("open_file phase: check_mimetype");
   if (!check_mimetype()) return false;
 
-  LOG_D("Getting the OPF file");
+  LOG_I("open_file phase: get_opf_filename");
   std::string filename;
   if (!get_opf_filename(filename)) return false;
 
+  LOG_I("open_file phase: get_opf");
   if (!get_opf(filename)) {
     LOG_E("EPub open_file: Unable to get opf of %s", epub_filename.c_str());
     unzip.close_zip_file();
     return false;
   }
 
+  LOG_I("open_file phase: get_encryption_xml");
   get_encryption_xml();
 
+  LOG_I("open_file phase: open_params");
   open_params(epub_filename);
+  LOG_I("open_file phase: update_book_format_params");
   update_book_format_params();
 
   // No page_locs.stop_document() / page_cache.invalidate_all()
@@ -936,12 +950,15 @@ EPub::open_file(const std::string & epub_filename)
   // We log but don't fail the open: showing the user the book
   // with the wrong font is better UX than refusing to open it.
   // The PARS could be repaired by the user through the menu.
+  LOG_I("open_file phase: adjust_default_font (idx=%u)",
+        (unsigned) book_format_params.font);
   if (!fonts.adjust_default_font(book_format_params.font)) {
     LOG_E("EPub::open: adjust_default_font(%u) failed; rendering with "
           "current default font instead",
           (unsigned) book_format_params.font);
   }
 
+  LOG_I("open_file phase: clear_item_data");
   clear_item_data(current_item_info);
 
   current_filename     = epub_filename;
@@ -949,7 +966,7 @@ EPub::open_file(const std::string & epub_filename)
   fonts_size_too_large = false;
   fonts_size           = 0;
 
-  LOG_D("EPub file is now open.");
+  LOG_I("open_file phase: DONE");
 
   return true;
 }
