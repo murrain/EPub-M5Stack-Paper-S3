@@ -194,11 +194,10 @@ EPub::get_encryption_xml()
 
   encryption_present = false;
 
-  if ((unzip.file_exists(fname) && 
+  if ((unzip.file_exists(fname) &&
       (encryption_data = unzip.get_file(fname, size)) != nullptr)) {
-    xml_parse_result res = encryption.load_buffer_inplace(encryption_data, size);
-    if (res.status != status_ok) {
-      LOG_E("encryption.xml load error: %d", res.status);
+    if (!parse_xml_or_reset(encryption_data, size, encryption,
+                            "encryption.xml")) {
       free(encryption_data);
       encryption_data = nullptr;
       return false;
@@ -243,9 +242,7 @@ EPub::get_opf_filename(std::string & filename)
   xml_node        node;
   xml_attribute   attr;
 
-  xml_parse_result res = doc.load_buffer_inplace(data, size);
-  if (res.status != status_ok) {
-    LOG_E("xml load error: %d", res.status);
+  if (!parse_xml_or_reset(data, size, doc, "container.xml")) {
     free(data);
     return false;
   }
@@ -386,10 +383,7 @@ EPub::get_opf(std::string & filename)
 
     if (!(opf_data = unzip.get_file(filename.c_str(), size))) ERR(6);
 
-    xml_parse_result res = opf.load_buffer_inplace(opf_data, size);
-    if (res.status != status_ok) {
-      LOG_E("xml load error: %d", res.status);
-      opf.reset();
+    if (!parse_xml_or_reset(opf_data, size, opf, "OPF")) {
       free(opf_data);
       opf_data = nullptr;
       return false;
@@ -806,17 +800,8 @@ EPub::get_item(pugi::xml_node itemref,
       }
       LOG_D("Reading file %s", attr.value());
 
-      xml_parse_result res = item.xml_doc.load_buffer_inplace(item.data, size);
-      if (res.status != status_ok) {
-        LOG_E("item_doc xml load error: %d", res.status);
-        // msg_viewer.show(
-        //   MsgViewer::MsgType::ALERT, 
-        //   true, false, 
-        //   "XML Error in eBook.", 
-        //   "File %s contains XHTML errors and cannot be loaded.",
-        //   attr.value()
-        // );
-        item.xml_doc.reset();
+      if (!parse_xml_or_reset(item.data, size, item.xml_doc,
+                              "item_doc")) {
         if (item.data != nullptr) {
           free(item.data);
           item.data = nullptr;
@@ -1069,6 +1054,24 @@ EPub::close_file()
     book_params = nullptr;
   }
 
+  return true;
+}
+
+bool
+EPub::parse_xml_or_reset(char *               buffer,
+                         uint32_t             size,
+                         pugi::xml_document & doc,
+                         const char *         site_tag)
+{
+  xml_parse_result res = doc.load_buffer_inplace(buffer, size);
+  if (res.status != status_ok) {
+    LOG_E("%s: xml load error: %d", site_tag, res.status);
+    // Reset is the invariant the audit caught two sites missing.
+    // Without it the document is in partially-applied parse state
+    // and the next read returns garbage rather than empty nodes.
+    doc.reset();
+    return false;
+  }
   return true;
 }
 

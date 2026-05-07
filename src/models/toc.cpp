@@ -329,9 +329,7 @@ TOC::load_from_epub()
 
   // parse xml and load navPoint entries
 
-  xml_parse_result res = ncx_opf->load_buffer_inplace(ncx_data, ncx_size);
-  if (res.status != status_ok) {
-    LOG_E("xml load error: %d", res.status);
+  if (!epub.parse_xml_or_reset(ncx_data, ncx_size, *ncx_opf, "NCX")) {
     goto error;
   }
   else {
