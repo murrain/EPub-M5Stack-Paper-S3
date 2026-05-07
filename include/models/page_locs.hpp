@@ -155,6 +155,21 @@ class PageLocs
     // explicit and greppable.
     [[nodiscard]] bool stop_document();
 
+    /**
+     * @brief True iff the retriever (RetrieverTask + StateTask) is
+     *        not currently building or queued to build. Used by
+     *        EPub::close_file's assert to catch raw-close misuse:
+     *        any close that happens while the retriever is still
+     *        running risks UAF on item_info / opf / css / unzip
+     *        dereferences. The canonical safe sequence is
+     *        EPub::quiesce_book_session() (which calls
+     *        page_cache.stop + stop_document) followed by
+     *        close_file. Direct close_file callers MUST first
+     *        observe is_retriever_idle == true OR have just
+     *        successfully called quiesce_book_session.
+     */
+    bool is_retriever_idle();
+
     inline const PageInfo* get_page_info(const PageId & page_id) {
       std::scoped_lock   guard(mutex);
       PagesMap::iterator it = check_and_find(page_id);

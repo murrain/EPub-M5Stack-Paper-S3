@@ -195,9 +195,24 @@ static void
 wifi_mode()
 {
   #if EPUB_INKPLATE_BUILD
-    epub.close_file();
-    fonts.clear(true);
-    fonts.clear_glyph_caches();
+    // Quiesce before tearing down book + font state — the retriever
+    // and pre-paint pthread hold pointers into both, and freeing
+    // them under a live reader UAFs (audit 04-architecture.md A1
+    // finding). On quiesce timeout, skip the close + font clear:
+    // the book state stays resident through the wifi mode, which
+    // is slightly less memory-efficient but cannot crash. The
+    // fonts.clear(true) + clear_glyph_caches calls free RAM that
+    // wifi/web-server may want; quiesce success is the only safe
+    // entry point.
+    if (epub.quiesce_book_session()) {
+      epub.close_file();
+      fonts.clear(true);
+      fonts.clear_glyph_caches();
+    }
+    else {
+      LOG_E("wifi_mode: retriever did not idle; book state remains "
+            "resident through wifi session.");
+    }
 
     event_mgr.set_stay_on(true); // DO NOT sleep
 
@@ -213,10 +228,17 @@ usb_drive_mode()
 {
   // Same teardown shape as wifi_mode: close the active book, free
   // the font caches, prevent idle-sleep so the host doesn't lose
-  // the device mid-transfer.
-  epub.close_file();
-  fonts.clear(true);
-  fonts.clear_glyph_caches();
+  // the device mid-transfer. quiesce_book_session is the safe
+  // entry point — see wifi_mode comment for the UAF rationale.
+  if (epub.quiesce_book_session()) {
+    epub.close_file();
+    fonts.clear(true);
+    fonts.clear_glyph_caches();
+  }
+  else {
+    LOG_E("usb_drive_mode: retriever did not idle; book state "
+          "remains resident through USB session.");
+  }
 
   event_mgr.set_stay_on(true);
 
@@ -341,8 +363,21 @@ init_nvs()
   static void
   ntp_clock_adjust()
   {
-    page_locs.abort_threads();
-    epub.close_file();
+    // The original sequence here was abort_threads() + close_file().
+    // abort_threads is a hard kill (sends ABORT, join the threads)
+    // that has the SAME wedge risk as stop_document — the join()
+    // blocks forever if the retriever is mid-build. And close_file
+    // freed state under a still-live retriever, same UAF as wifi/
+    // usb. Replace with quiesce_book_session: cooperative stop +
+    // bool return + skip-close on timeout. NTP work runs fine with
+    // the book state alive (it uses wifi + RTC, not book state).
+    if (epub.quiesce_book_session()) {
+      epub.close_file();
+    }
+    else {
+      LOG_E("ntp_clock_adjust: retriever did not idle; book state "
+            "remains resident during NTP fetch.");
+    }
 
     std::string ntp_server;
     config.get(Config::Ident::NTP_SERVER, ntp_server);
