@@ -94,12 +94,21 @@ void AppController::launch()
   #if EPUB_LINUX_BUILD
     if (next_ctrl == Ctrl::NONE) return;
   #endif
-  
+
   Ctrl the_ctrl = next_ctrl;
   next_ctrl = Ctrl::NONE;
 
+  // Fire-this-can't-be-missed marker. If "DONE (success)" is the
+  // last serial line on a wedged Belgariade open, we need to know
+  // whether launch() is even being called. LOG_W is always-on; if
+  // this line never prints after a transition was scheduled via
+  // set_controller, the run() loop never re-entered launch().
+  LOG_W("launch: phase: BEGIN (the_ctrl=%d current_ctrl=%d)",
+        (int) the_ctrl, (int) current_ctrl);
+
   if (((the_ctrl == Ctrl::LAST) && (last_ctrl[0] != current_ctrl)) || (the_ctrl != current_ctrl)) {
 
+    LOG_W("launch: phase: leave_current (current_ctrl=%d)", (int) current_ctrl);
     switch (current_ctrl) {
       case Ctrl::DIR:     books_dir_controller.leave(); break;
       case Ctrl::BOOK:         book_controller.leave(); break;
@@ -109,6 +118,7 @@ void AppController::launch()
       case Ctrl::NONE:
       case Ctrl::LAST:                                  break;
     }
+    LOG_W("launch: phase: leave_done");
 
     Ctrl tmp = current_ctrl;
     current_ctrl = (the_ctrl == Ctrl::LAST) ? last_ctrl[0] : the_ctrl;
@@ -122,6 +132,7 @@ void AppController::launch()
       last_ctrl[0] = tmp;
     }
 
+    LOG_W("launch: phase: enter_new (current_ctrl=%d)", (int) current_ctrl);
     switch (current_ctrl) {
       case Ctrl::DIR:     books_dir_controller.enter(); break;
       case Ctrl::BOOK:         book_controller.enter(); break;
@@ -131,7 +142,12 @@ void AppController::launch()
       case Ctrl::NONE:
       case Ctrl::LAST:                                  break;
     }
+    LOG_W("launch: phase: enter_done");
   }
+  else {
+    LOG_W("launch: phase: NO_TRANSITION (the_ctrl==current_ctrl)");
+  }
+  LOG_W("launch: phase: END");
 }
 
 void 
