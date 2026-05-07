@@ -96,6 +96,23 @@ class PageLocs
 
     void show();
     bool retrieve_asap(int16_t itemref_index);
+
+    /**
+     * @brief Fire-and-forget GET_ASAP nudge to the retriever.
+     *
+     * Sends GET_ASAP for `itemref_index` and returns immediately
+     * without waiting for ASAP_READY. Used by foreground page-
+     * navigation paths (get_next_page_id / get_prev_page_id) that
+     * MUST NOT block on the retriever — the user's reading
+     * experience requires page-turn responses to feel instant
+     * (user-stated invariant 2026-05-07: "Reader should always be
+     * responsive to page turns 100% of the time").
+     *
+     * The retriever processes this asap_itemref next (after the
+     * current item completes), so the next swipe attempt against
+     * the same boundary will find the page in pages_map.
+     */
+    void request_asap(int16_t itemref_index);
     PagesMap::iterator check_and_find(const PageId & page_id);
 
     // ----- Page Locations computation -----

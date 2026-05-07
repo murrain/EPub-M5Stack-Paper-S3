@@ -926,9 +926,40 @@ PageLocs::build_page_locs(int16_t itemref_index)
 
 volatile bool relax = false;
 
-bool 
-PageLocs::retrieve_asap(int16_t itemref_index) 
+void
+PageLocs::request_asap(int16_t itemref_index)
 {
+  // Fire-and-forget: send GET_ASAP, return immediately. The eventual
+  // ASAP_READY reply lands in asap_queue with no waiter and is
+  // drained by the next retrieve_asap call (see drain loop there).
+  StateQueueData state_queue_data = {
+    .req           = StateReq::GET_ASAP,
+    .itemref_index = itemref_index,
+    .itemref_count = 0
+  };
+  LOG_D("request_asap: Sending GET_ASAP for itemref=%d (no wait)",
+        (int) itemref_index);
+  QUEUE_SEND(state_queue, state_queue_data, 0);
+}
+
+bool
+PageLocs::retrieve_asap(int16_t itemref_index)
+{
+  // Drain any stale ASAP_READY replies that request_asap left in
+  // the queue. request_asap is fire-and-forget — the retriever
+  // still emits ASAP_READY when the requested item is built, but
+  // there's no waiter consuming it. Without this drain, the
+  // first retrieve_asap call after one or more request_asap
+  // calls would consume a stale reply for a DIFFERENT itemref
+  // and report success without actually waiting for OUR item.
+  // Non-blocking (timeout 0) so this is a fast no-op when the
+  // queue is empty.
+  MgrQueueData drain;
+  while (mgr_reply_recv_timed_ms(asap_queue, drain, 0)) {
+    LOG_D("retrieve_asap: drained stale ASAP_READY (itemref=%d)",
+          (int) drain.itemref_index);
+  }
+
   StateQueueData state_queue_data;
   state_queue_data = {
     .req           = StateReq::GET_ASAP,
@@ -1116,14 +1147,23 @@ PageLocs::check_and_find(const PageId & page_id)
   return it;
 }
 
-const PageLocs::PageId * 
+const PageLocs::PageId *
 PageLocs::get_next_page_id(const PageId & page_id, int16_t count)
 {
   std::scoped_lock guard(mutex);
 
-  PagesMap::iterator it = check_and_find(page_id);
+  // Forward nav follows the same non-blocking rule as backward
+  // (see get_prev_page_id): if the next item isn't paginated yet,
+  // stop at the boundary, fire-and-forget a GET_ASAP nudge, and
+  // let the user retry in a moment. The user-stated invariant
+  // (2026-05-07) is "page turns 100% responsive"; a 10 s block
+  // here for the retriever to catch up violates it.
+  PagesMap::iterator it = pages_map.find(page_id);
   if (it == pages_map.end()) {
-    it = check_and_find(PageId(0,0));
+    it = pages_map.find(PageId(0, 0));
+    if (it == pages_map.end() && !completed) {
+      request_asap(page_id.itemref_index);
+    }
   }
   else {
     PageId id = page_id;
@@ -1134,36 +1174,54 @@ PageLocs::get_next_page_id(const PageId & page_id, int16_t count)
         id.offset += abs(it->second.size);
         it = pages_map.find(id);
         if (it == pages_map.end()) {
-          // We have reached the end of the current item. Move to the next
-          // item and try again
+          // End of current item. Step into next item — but only
+          // if it's paginated. Otherwise stop at the boundary.
           id.itemref_index += 1; id.offset = 0;
-          it = check_and_find(id);
+          if (id.itemref_index < item_count &&
+              items_set.find(id.itemref_index) == items_set.end()) {
+            // Next item not paginated yet — nudge and stop.
+            request_asap(id.itemref_index);
+            it = prev;
+            done = true;
+            break;
+          }
+          it = pages_map.find(id);
           if (it == pages_map.end()) {
-            // We have reached the end of the list. If stepping one page at a time, go
-            // to the first page
-            it = (count > 1) ? prev : check_and_find(PageId(0,0));
+            // Hit end of book (or the next item is paginated but
+            // we somehow can't find its first page). Fall back to
+            // staying on the current page on multi-step requests,
+            // wrap to start on single-step (existing semantics).
+            it = (count > 1) ? prev : pages_map.find(PageId(0, 0));
             done = true;
           }
         }
-      } while ((it->second.size < 0) && !done);
+      } while ((it != pages_map.end()) && (it->second.size < 0) && !done);
       if (done) break;
     }
   }
   return (it == pages_map.end()) ? nullptr : &it->first;
 }
 
-const PageLocs::PageId * 
-PageLocs::get_prev_page_id(const PageId & page_id, int count) 
+const PageLocs::PageId *
+PageLocs::get_prev_page_id(const PageId & page_id, int count)
 {
   std::scoped_lock guard(mutex);
 
-  PagesMap::iterator it = check_and_find(page_id);
+  // Non-blocking: see top-of-function comment in get_next_page_id.
+  // Same invariant ("page turns 100% responsive"). Drop the
+  // blocking check_and_find for pages_map.find — current page
+  // is normally already in pages_map (the user is reading it);
+  // only on a controller-state restoration could it not be.
+  PagesMap::iterator it = pages_map.find(page_id);
   if (it == pages_map.end()) {
-    it = check_and_find(PageId(0, 0));
+    it = pages_map.find(PageId(0, 0));
+    if (it == pages_map.end() && !completed) {
+      request_asap(page_id.itemref_index);
+    }
   }
   else {
     PageId id = it->first;
-    
+
     bool done = false;
     for (int16_t cptr = count; cptr > 0; cptr--) {
       do {
@@ -1174,11 +1232,29 @@ PageLocs::get_prev_page_id(const PageId & page_id, int count)
           }
           else id.itemref_index--;
 
+          // Backward nav must stay non-blocking. The blocking
+          // retrieve_asap path was firing repeatedly per swipe on
+          // Belgariade-class books (auto-resume opens deep in
+          // spine, retriever paginates forward from there leaving
+          // items 0..N-1 behind the user unbuilt; each backward
+          // swipe issued GET_ASAP which timed out at 10 s because
+          // the retriever has no preemption point inside build_
+          // pages_recurse). 7 swipes ≈ 2 min of apparent freeze
+          // (user-reported 2026-05-07; user-stated invariant
+          // "always responsive to page turns 100% of the time").
+          //
+          // Behavior now: stop at the oldest paginated boundary,
+          // FIRE-AND-FORGET a GET_ASAP nudge so the retriever
+          // services the requested item next, and let the user
+          // try again momentarily. Soft "can't go back yet" beats
+          // a hard wedge.
           if (items_set.find(id.itemref_index) == items_set.end()) {
-            retrieve_asap(id.itemref_index);
+            request_asap(id.itemref_index);
+            done = true;
+            break;
           }
         }
-        
+
         if (!done) {
           if (it == pages_map.begin()) it = pages_map.end();
           it--;
