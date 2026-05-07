@@ -73,15 +73,42 @@ Fonts::get_file(const char * filename, uint32_t size)
 static uint32_t font_size;
 inline bool check_res(xml_parse_result res) { return res.status == status_ok; }
 
-static bool check_file(const std::string & filename) 
+// Per-font (4 styles combined) cumulative size cap, used ONLY
+// by the boot-time check_file gate during fonts_list.xml parse.
+// This is a "show in font menu / register in font_names[]"
+// eligibility check — files larger than the cap are silently
+// dropped from the registered list at boot. There is NO runtime
+// cap in adjust_default_font / FontFactory::create; if a font
+// passes boot registration it can be loaded later regardless of
+// runtime memory pressure (the user just gets a load failure
+// from FontFactory if RAM is exhausted).
+//
+// The original 300 KB ceiling was sized for the Inkplate-6 era
+// — no PSRAM, tight internal RAM. PaperS3 has 8 MB PSRAM and
+// Inkplate-6Plus / TOUCH_TRIAL targets all have substantial
+// headroom. Bump to 2 MB on those — accommodates Tinos (~1.7 MB
+// unsubsetted) and other modern Latin-extended fonts without
+// forcing the user to subset before they can install.
+//
+// Buttons-only (Inkplate-6 / Inkplate-10) keep the original
+// tight cap; those builds can hit memory pressure and the old
+// number was a defensive ceiling that's still load-bearing
+// there.
+#if (INKPLATE_6PLUS || TOUCH_TRIAL)
+  static constexpr uint32_t MAX_FONT_SET_SIZE = 1024 * 1024 * 2;  // 2 MB
+#else
+  static constexpr uint32_t MAX_FONT_SET_SIZE = 1024 * 300;       // 300 KB
+#endif
+
+static bool check_file(const std::string & filename)
 {
   constexpr const char * TAG = "Check File";
   struct stat file_stat;
   if (!filename.empty()) {
-    std::string full_name = std::string(FONTS_FOLDER "/").append(filename); 
+    std::string full_name = std::string(FONTS_FOLDER "/").append(filename);
     if (stat(full_name.c_str(), &file_stat) != -1) {
       font_size += file_stat.st_size;
-      if (font_size > (1024 * 300)) {
+      if (font_size > MAX_FONT_SET_SIZE) {
         LOG_E("Font size too big for %s", filename.c_str());
       }
       else return true;
@@ -283,39 +310,107 @@ Fonts::clear_everything()
   font_cache.reserve(20);
 }
 
-void
+bool
 Fonts::adjust_default_font(uint8_t font_index)
 {
   // Guard against a corrupted .pars / config persisting an out-of-range
   // font index. The font_*_fname arrays are sized 8 (the hard cap in the
-  // font-loader at line 166) and only the first font_count slots are
-  // populated. Without this clamp, an out-of-range index would read
-  // arbitrary memory and replace() would attempt to load a garbage path.
+  // font-loader) and only the first font_count slots are populated.
+  // Without this clamp an out-of-range index would read arbitrary memory.
   if (font_index >= font_count) {
     LOG_E("adjust_default_font: index %u out of range (count=%u); using 0",
           (unsigned)font_index, (unsigned)font_count);
     font_index = 0;
   }
-  if (font_count == 0) return;
+  if (font_count == 0) return false;
 
-  if (font_cache.at(3).name.compare(font_names[font_index]) != 0) {
-    std::string normal      = std::string(FONTS_FOLDER "/").append(    regular_fname[font_index]);
-    std::string bold        = std::string(FONTS_FOLDER "/").append(       bold_fname[font_index]);
-    std::string italic      = std::string(FONTS_FOLDER "/").append(     italic_fname[font_index]);
-    std::string bold_italic = std::string(FONTS_FOLDER "/").append(bold_italic_fname[font_index]);
-
-    if (!replace(3, font_names[font_index], FaceStyle::NORMAL,      normal     )) return;
-    if (!replace(4, font_names[font_index], FaceStyle::BOLD,        bold       )) return;
-    if (!replace(5, font_names[font_index], FaceStyle::ITALIC,      italic     )) return;
-    if (!replace(6, font_names[font_index], FaceStyle::BOLD_ITALIC, bold_italic)) return;
-
-    LOG_D("Default font is now %s", font_names[font_index]);
+  // Already on this font — no-op success. The font_cache.at(3)
+  // read needs the mutex: a concurrent clear(true) on
+  // use_fonts_in_book toggle resizes the vector to 3 entries
+  // (line ~298), and an unguarded at(3) would then bounds-fail.
+  // Lock just for the read; release before the heavy
+  // FontFactory::create calls (those allocate, parse FreeType,
+  // potentially do SD I/O — no need to stall other readers
+  // through that).
+  {
+    std::scoped_lock guard(mutex);
+    if (font_cache.size() > 3 &&
+        font_cache.at(3).name.compare(font_names[font_index]) == 0) {
+      return true;
+    }
   }
+
+  std::string normal      = std::string(FONTS_FOLDER "/").append(    regular_fname[font_index]);
+  std::string bold        = std::string(FONTS_FOLDER "/").append(       bold_fname[font_index]);
+  std::string italic      = std::string(FONTS_FOLDER "/").append(     italic_fname[font_index]);
+  std::string bold_italic = std::string(FONTS_FOLDER "/").append(bold_italic_fname[font_index]);
+
+  // Transactional swap: pre-load all 4 styles into temporaries before
+  // touching the cache. If any one fails (file too large, file missing,
+  // FreeType parse error, OTF/CFF table issue from an aggressive
+  // subsetting tool, etc.), we delete the loaded temps and leave the
+  // cache exactly as it was — the previous default font keeps working.
+  //
+  // Pre-refactor (replace() chain) this was a half-swap: regular and
+  // bold could land at indices 3-4 while italic and bold-italic stayed
+  // as the old font at 5-6. Mismatched font metrics across styles
+  // broke layout (page_locs computation) and books then "failed to
+  // load" — exactly the Tinos symptom that prompted this refactor.
+  Font * tmp_normal      = FontFactory::create(normal);
+  Font * tmp_bold        = FontFactory::create(bold);
+  Font * tmp_italic      = FontFactory::create(italic);
+  Font * tmp_bold_italic = FontFactory::create(bold_italic);
+
+  const bool all_loaded =
+    (tmp_normal      != nullptr) && tmp_normal     ->is_ready() &&
+    (tmp_bold        != nullptr) && tmp_bold       ->is_ready() &&
+    (tmp_italic      != nullptr) && tmp_italic     ->is_ready() &&
+    (tmp_bold_italic != nullptr) && tmp_bold_italic->is_ready();
+
+  if (!all_loaded) {
+    delete tmp_normal;
+    delete tmp_bold;
+    delete tmp_italic;
+    delete tmp_bold_italic;
+    LOG_E("adjust_default_font: failed to load %s; cache unchanged",
+          font_names[font_index]);
+    return false;
+  }
+
+  // All 4 loaded. Commit under the cache mutex: free the previous
+  // default font's 4 entries and install the new ones at the same
+  // indices 3..6.
+  std::scoped_lock guard(mutex);
+
+  delete font_cache.at(3).font;
+  font_cache.at(3) = { font_names[font_index], tmp_normal,      FaceStyle::NORMAL };
+  tmp_normal->set_fonts_cache_index(3);
+
+  delete font_cache.at(4).font;
+  font_cache.at(4) = { font_names[font_index], tmp_bold,        FaceStyle::BOLD };
+  tmp_bold->set_fonts_cache_index(4);
+
+  delete font_cache.at(5).font;
+  font_cache.at(5) = { font_names[font_index], tmp_italic,      FaceStyle::ITALIC };
+  tmp_italic->set_fonts_cache_index(5);
+
+  delete font_cache.at(6).font;
+  font_cache.at(6) = { font_names[font_index], tmp_bold_italic, FaceStyle::BOLD_ITALIC };
+  tmp_bold_italic->set_fonts_cache_index(6);
+
+  LOG_D("Default font is now %s", font_names[font_index]);
+  return true;
 }
 
 void
 Fonts::clear_glyph_caches()
 {
+  // Acquire the same mutex as clear / clear_everything /
+  // adjust_default_font use. Pre-refactor this method walked
+  // font_cache without the lock, which would race with the
+  // others. Adding here for consistency with the rest of the
+  // class — costs a brief uncontended lock acquire.
+  std::scoped_lock guard(mutex);
   for (auto & entry : font_cache) {
     entry.font->clear_cache();
   }
@@ -337,43 +432,12 @@ Fonts::get_index(const std::string & name, FaceStyle style)
   return -1;
 }
 
-bool 
-Fonts::replace(int16_t             index,
-               const std::string & name, 
-               FaceStyle           style,
-               const std::string & filename)
-{
-  std::scoped_lock guard(mutex);
-  
-  FontEntry f;
-  if ((f.font = FontFactory::create(filename))) {
-    if (f.font->is_ready()) {
-      f.name  = name;
-      f.style = style;
-      f.font->set_fonts_cache_index(index);
-      delete font_cache.at(index).font;
-      font_cache.at(index) = f;
+// (Fonts::replace removed: only caller was the pre-transactional
+// adjust_default_font which has been rewritten to do its own
+// pre-load + atomic swap. Re-introduce if a future use case
+// genuinely needs single-slot replacement.)
 
-      LOG_D("Font %s (%s) replacement at index %d and style %d.",
-        f.name.c_str(), 
-        filename.c_str(),
-        f.font->get_fonts_cache_index(),
-        (int)f.style);
-      return true;
-    }
-    else {
-      delete f.font;
-    }
-  }
-  else {
-    LOG_E("Unable to allocate memory.");
-    // msg_viewer.out_of_memory("font allocation");
-  }
-
-  return false;
-}
-
-bool 
+bool
 Fonts::add(const std::string & name, 
            FaceStyle           style,
            const std::string & filename)
