@@ -106,6 +106,7 @@ class OptionController : public MenuControllerBase
     void dispatch_to_sub_state(
       const EventMgr::Event & event,
       bool                    skip_strip_refresh = false) override;
+    void redraw_underlying_state() override;
 };
 
 #if __OPTION_CONTROLLER__

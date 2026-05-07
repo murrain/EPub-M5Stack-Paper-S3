@@ -511,6 +511,19 @@ OptionController::show_menu()
   menu_viewer.show(menu);
 }
 
+void
+OptionController::redraw_underlying_state()
+{
+  // Repaint the books-dir beneath, then the menu strip on top.
+  // BooksDirController::refresh_view re-derives the viewer
+  // (orientation may have just changed in main_form), repaints
+  // the books area, and at the end calls option_controller.
+  // show_menu() to repaint the strip — both halves in one call.
+  // OPTION can only be entered from DIR, so refresh_view's
+  // !epub.is_file_open() assert holds by construction.
+  books_dir_controller.refresh_view();
+}
+
 #if INKPLATE_6PLUS || MENU_6PLUS
   static void 
   goto_next()
@@ -611,17 +624,12 @@ OptionController::dispatch_to_sub_state(
         epub.update_book_format_params();
       }
 
-      #if !defined(BOARD_TYPE_PAPER_S3)
-        if ((old_orientation != orientation) ||
-            (old_resolution  != resolution )) {
-      #else
-        if (old_orientation != orientation) {
-      #endif
-        if (!skip_strip_refresh) menu_viewer.show(menu, 2, true);
-      }
-      else {
-        if (!skip_strip_refresh) menu_viewer.clear_highlight();
-      }
+      // form_viewer covers the books-dir + strip. Redraw both.
+      // On orientation/resolution change, refresh_view re-derives
+      // the viewer with the new layout; on no-op param tweaks the
+      // same path is still correct (just paints what's there).
+      // Persistent-strip flow skips: outer caller will re-render.
+      if (!skip_strip_refresh) redraw_underlying_state();
     }
   }
   else if (font_form_is_shown) {
@@ -685,7 +693,7 @@ OptionController::dispatch_to_sub_state(
         }
       }
 
-      if (!skip_strip_refresh) menu_viewer.clear_highlight();
+      if (!skip_strip_refresh) redraw_underlying_state();
     }
   }
 
@@ -693,7 +701,7 @@ OptionController::dispatch_to_sub_state(
     else if (date_time_form_is_shown) {
       if (form_viewer.event(event)) {
         date_time_form_is_shown = false;
-        if (!skip_strip_refresh) menu_viewer.clear_highlight();
+        if (!skip_strip_refresh) redraw_underlying_state();
         set_clock();
       }
     }
@@ -729,7 +737,7 @@ OptionController::dispatch_to_sub_state(
     else if (calibration_is_shown) {
       if (event_mgr.calibration_event(event)) {
         calibration_is_shown = false;
-        if (!skip_strip_refresh) menu_viewer.show(menu, 0, true);
+        if (!skip_strip_refresh) redraw_underlying_state();
       }
     }
   #endif
