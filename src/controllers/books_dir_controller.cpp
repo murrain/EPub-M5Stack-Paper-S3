@@ -319,25 +319,42 @@ BooksDirController::enter()
   }
 
   #if (INKPLATE_6PLUS || TOUCH_TRIAL)
-    // Paint the option menu as a persistent header strip on top
-    // of the just-rendered books area. The books viewer's
-    // first_entry_ypos was sized using BooksDirViewer::
-    // get_header_height() so the strip sits in unrendered
-    // (white) space — no overlap with book covers or list rows.
-    // Strip taps are dispatched inline by input_event below
-    // (no transition to a separate OPTION controller state).
-    // menu_viewer.show() commits via partial update_region for
-    // the strip area only — the just-painted books area stays
-    // put on the panel.
-    option_controller.show_menu();
+    // Skip the strip paint if we just scheduled a transition out of
+    // BooksDirController (most commonly the warm-wake auto-resume
+    // path: show_last_book -> open_book_file -> page_cache.start
+    // -> set_controller(BOOK)). At this point the pre-paint pthread
+    // is live and the foreground panel write below deadlocks
+    // against it — observed as "Loading a book" wedge with last
+    // serial line "show_last_book: phase: set_controller_returned"
+    // and zero AppController::launch markers afterward, because
+    // show_menu() never returns and enter() never unwinds back to
+    // the run loop.
+    //
+    // The BookController::enter that's about to run will paint
+    // its own page; the books-dir UI under the strip is about to
+    // be replaced wholesale. Painting the strip here would be
+    // wasted work even if it didn't deadlock.
+    if (!app_controller.has_pending_transition()) {
+      // Paint the option menu as a persistent header strip on top
+      // of the just-rendered books area. The books viewer's
+      // first_entry_ypos was sized using BooksDirViewer::
+      // get_header_height() so the strip sits in unrendered
+      // (white) space — no overlap with book covers or list rows.
+      // Strip taps are dispatched inline by input_event below
+      // (no transition to a separate OPTION controller state).
+      // menu_viewer.show() commits via partial update_region for
+      // the strip area only — the just-painted books area stays
+      // put on the panel.
+      option_controller.show_menu();
 
-    // Drift assert: get_header_height() (the static formula
-    // mirror) and get_region_height() (the value computed
-    // inside show()) must agree. If they ever disagree, the
-    // formula in MenuViewer::compute_region_height has drifted
-    // from MenuViewer::show — fix the formula, not the assert.
-    // Both run after fonts load, so this is a tight equality.
-    assert(menu_viewer.get_region_height() == BooksDirViewer::get_header_height());
+      // Drift assert: get_header_height() (the static formula
+      // mirror) and get_region_height() (the value computed
+      // inside show()) must agree. If they ever disagree, the
+      // formula in MenuViewer::compute_region_height has drifted
+      // from MenuViewer::show — fix the formula, not the assert.
+      // Both run after fonts load, so this is a tight equality.
+      assert(menu_viewer.get_region_height() == BooksDirViewer::get_header_height());
+    }
   #endif
 }
 

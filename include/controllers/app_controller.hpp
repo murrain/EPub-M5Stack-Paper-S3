@@ -79,6 +79,17 @@ class AppController
     void going_to_deep_sleep();
     void launch();
 
+    // True if a controller transition has been requested (via
+    // set_controller) but launch() hasn't yet processed it. Used by
+    // BooksDirController::enter to gate the persistent menu strip
+    // paint: when show_last_book schedules a transition to BOOK, the
+    // book's open path has already started page_cache (live pre-paint
+    // pthread). A subsequent option_controller.show_menu() panel
+    // write from the foreground deadlocks against the pre-paint
+    // thread's render lock — observed as "Loading a book" wedge with
+    // last serial line "show_last_book: phase: set_controller_returned".
+    bool has_pending_transition() const { return next_ctrl != Ctrl::NONE; }
+
   private:
     static constexpr char const * TAG = "AppController";
 
