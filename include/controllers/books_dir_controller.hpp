@@ -32,6 +32,14 @@ class BooksDirController
     // future code path reaches enter() without going through setup().
     bool        refresh_deferred = false;
 
+    // Set by show_last_book() when open_book_file fails and a
+    // msg_viewer alert is shown. enter() then skips the menu strip
+    // paint so the alert isn't clobbered. The flag survives only
+    // until the next user interaction reaches enter() again — set
+    // in show_last_book's failure branch, consumed (and cleared)
+    // by enter() right after it gates the strip paint.
+    bool        last_book_open_failed = false;
+
     PageLocs::PageId book_page_id;
     BooksDirViewer * books_dir_viewer;
     int8_t viewer_id;
