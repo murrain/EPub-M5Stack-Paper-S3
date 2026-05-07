@@ -115,10 +115,20 @@ class EPub
      *
      * Previously the invalidation lived as scattered calls in
      * book_param_controller (always remembered) and option_controller
-     * (forgotten — see audit 00-summary.md "🟡 option_controller
-     * doesn't invalidate page_cache after format-param changes").
-     * Centralizing here fixes the bug AND removes 4 sites of
+     * (forgotten — overnight audit caught this as a real warm-wake
+     * bug). Centralizing here fixes the bug AND removes 4 sites of
      * duplication.
+     *
+     * Why eager invalidation rather than relying on PageCache's
+     * format_hash check: format_hash catches stale entries lazily
+     * (each get() call computes the new hash and rejects mismatch),
+     * but the slots stay occupied until the next ±N residency
+     * request evicts them. Eager invalidate_all reclaims those
+     * slots immediately so the next pre-paint pass renders fresh
+     * content into them right away rather than after the next user
+     * navigation. wake_snapshot has no equivalent format-hash guard
+     * — it's load-or-discard at warm wake time only — so eager
+     * invalidation is the only way to prevent stale-painting.
      */
     void update_book_format_params(bool invalidate_dependent_caches = true);
 
