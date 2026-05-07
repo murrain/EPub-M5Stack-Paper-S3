@@ -109,8 +109,13 @@ book_parameters()
 static void
 revert_to_defaults()
 {
-  page_locs.stop_document();
-  
+  // (void)-cast: best-effort early stop. The defensive stop at
+  // ~line 156 (right before the font mutation) is the safety-
+  // critical one; if the retriever is wedged THAT call's bool
+  // check refuses the font mutation. This top-of-function call
+  // is just a pre-emptive idle.
+  (void) page_locs.stop_document();
+
   EPub::BookFormatParams * book_format_params = epub.get_book_format_params();
 
   BookParams * book_params = epub.get_book_params();
@@ -151,9 +156,22 @@ revert_to_defaults()
   // only writes via the prepaint_queue, which msg_viewer.show
   // doesn't enqueue), so a second invalidate_all would walk the
   // already-empty entry table for no benefit.
+  // Bool-checked: this is the load-bearing safety stop before
+  // the font mutation. If the retriever is wedged, doing
+  // fonts.clear / load_fonts / adjust_default_font would UAF on
+  // any Font* the retriever still holds via fonts.get(). On
+  // failure, log and skip the font-side mutation entirely; the
+  // PARS file already reflects the new defaults (book_params->put
+  // ran before this) and will take effect on the next book open
+  // when the retriever is fresh.
   if (old_use_fonts_in_book != book_format_params->use_fonts_in_book ||
       old_font              != book_format_params->font) {
-    page_locs.stop_document();
+    if (!page_locs.stop_document()) {
+      LOG_E("revert_to_defaults: retriever did not idle; skipping "
+            "font-side mutation to avoid UAF. New defaults are in "
+            "PARS and will apply on next book open.");
+      return;
+    }
   }
 
   if (old_use_fonts_in_book != book_format_params->use_fonts_in_book) {
@@ -167,7 +185,13 @@ revert_to_defaults()
   }
 
   if (old_font != book_format_params->font) {
-    fonts.adjust_default_font(book_format_params->font);
+    // (void)-cast on adjust_default_font: revert_to_defaults is a
+    // user-initiated reset; if the new default font fails to load,
+    // the cache stays on the previous default (per the doc comment
+    // on adjust_default_font) and the user sees the prior font
+    // until they pick a different one. No additional handling
+    // needed here.
+    (void) fonts.adjust_default_font(book_format_params->font);
   }
 }
 
@@ -331,8 +355,19 @@ BookParamController::dispatch_to_sub_state(
       // O(ms); both are safe to call even if no font change
       // actually happens (idempotent on quiesced state).
       if (old_font != font) {
-        page_locs.stop_document();
-        page_cache.invalidate_all();
+        if (!page_locs.stop_document()) {
+          // Retriever didn't idle; skip the font swap entirely.
+          // Show the same UX as a font-load failure (alert +
+          // revert local var) so the form's about-to-be-persisted
+          // FONT param goes back to the working previous value.
+          msg_viewer.show_alert(
+                          "Could not apply font change",
+                          "Reader is busy. Try again in a moment.");
+          font = old_font;
+        }
+        else {
+          page_cache.invalidate_all();
+        }
       }
 
       // Validate the font change BEFORE persisting PARS. The
@@ -361,7 +396,12 @@ BookParamController::dispatch_to_sub_state(
       if (use_fonts_in_book != old_use_fonts_in_book) book_params->put(BookParams::Ident::USE_FONTS_IN_BOOK,  use_fonts_in_book);
 
       if (book_params->is_modified()) {
-        page_locs.stop_document();
+        // (void)-cast: format-params edit (orientation, show_title,
+        // show_images, font_size, use_fonts_in_book — but NOT font;
+        // font already handled above with bool-check). update_book_
+        // format_params just refreshes the cached struct — no Font*
+        // dereferences, so a still-live retriever can't UAF here.
+        (void) page_locs.stop_document();
         // update_book_format_params now invalidates wake_snapshot
         // and page_cache internally — both reflected the OLD
         // layout and would repaint stale content otherwise. See

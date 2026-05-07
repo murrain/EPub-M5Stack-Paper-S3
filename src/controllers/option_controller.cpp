@@ -562,7 +562,10 @@ OptionController::dispatch_to_sub_state(
 
       if ((old_orientation != orientation) ||
           (old_show_title  != show_title )) {
-        page_locs.stop_document();
+        // (void)-cast: format-param edit (no Font* mutation
+        // follows). update_book_format_params just refreshes the
+        // cached struct.
+        (void) page_locs.stop_document();
         epub.update_book_format_params();
       }
 
@@ -589,22 +592,31 @@ OptionController::dispatch_to_sub_state(
       // the transactional swap (which deletes the old font_-
       // cache.at(3..6).font) would UAF.
       if (old_default_font != default_font) {
-        page_locs.stop_document();
-        epub.update_book_format_params();
-        // Validate font load BEFORE persisting Config. Mirrors
-        // BookParamController: the global config is per-device
-        // and an unloadable DEFAULT_FONT here would persist
-        // across reboots, breaking the device for every book
-        // until the user manually edits config or recovers via
-        // the per-book PARS path. Revert the local
-        // `default_font` on failure so config.put writes the
-        // working previous value.
-        if (!fonts.adjust_default_font(default_font)) {
+        // Bool-check: load-bearing safety stop before font swap.
+        // Same shape as BookParamController's form path.
+        if (!page_locs.stop_document()) {
           msg_viewer.show_alert(
-                          "Font Load Failed",
-                          "Could not load the selected default font. "
-                          "The previous font is still in use.");
+                          "Could not change default font",
+                          "Reader is busy. Try again in a moment.");
           default_font = old_default_font;
+        }
+        else {
+          epub.update_book_format_params();
+          // Validate font load BEFORE persisting Config. Mirrors
+          // BookParamController: the global config is per-device
+          // and an unloadable DEFAULT_FONT here would persist
+          // across reboots, breaking the device for every book
+          // until the user manually edits config or recovers via
+          // the per-book PARS path. Revert the local
+          // `default_font` on failure so config.put writes the
+          // working previous value.
+          if (!fonts.adjust_default_font(default_font)) {
+            msg_viewer.show_alert(
+                            "Font Load Failed",
+                            "Could not load the selected default font. "
+                            "The previous font is still in use.");
+            default_font = old_default_font;
+          }
         }
       }
 
@@ -617,9 +629,10 @@ OptionController::dispatch_to_sub_state(
       if ((old_show_images        != show_images       ) ||
           (old_font_size          != font_size         ) ||
           (old_use_fonts_in_books != use_fonts_in_books)) {
-        // Font change already handled above; only run
-        // stop_document for OTHER param changes here.
-        page_locs.stop_document();
+        // (void)-cast: same as the orientation/show_title path —
+        // format-param refresh only, no Font* mutation. Font
+        // change was handled above with the bool-checked stop.
+        (void) page_locs.stop_document();
         epub.update_book_format_params();
       }
 

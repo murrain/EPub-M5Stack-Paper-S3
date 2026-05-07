@@ -147,7 +147,13 @@ class PageLocs
     // the close, otherwise the still-live retriever's next
     // dereference of freed item_info / opf / css / unzip state is
     // a LoadProhibited UAF.
-    bool            stop_document();
+    //
+    // [[nodiscard]] makes silent drops a compile error; callers
+    // that legitimately don't care about the result (font swap
+    // sites that quiesce defensively but are followed by their own
+    // safety logic) MUST `(void)` the return — making the choice
+    // explicit and greppable.
+    [[nodiscard]] bool stop_document();
 
     inline const PageInfo* get_page_info(const PageId & page_id) {
       std::scoped_lock   guard(mutex);

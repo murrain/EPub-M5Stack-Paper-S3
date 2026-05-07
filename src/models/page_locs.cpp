@@ -1074,7 +1074,16 @@ PageLocs::start_new_document(int16_t count, int16_t itemref_index)
   // the open path was opaque on the panel and we want the serial
   // wire to localize the stuck step in one boot cycle.
   LOG_W("start_new_document: phase: stop_document_if_needed");
-  if (!state_task.retriever_is_iddle()) stop_document();
+  // (void)-cast: the bool return is meaningful for callers that
+  // follow with state-freeing teardown (close_file, font swap),
+  // but here we're already preparing for a fresh document — the
+  // subsequent check_for_format_changes -> START_DOCUMENT path
+  // doesn't dereference any of the state the live retriever
+  // could touch. If the stop times out, the new RETRIEVE_ITEM
+  // queues alongside the wedged one; either the wedge clears or
+  // the next book open's stop_document times out too and the
+  // user power-cycles. Same outcome as before [[nodiscard]].
+  if (!state_task.retriever_is_iddle()) (void) stop_document();
 
   LOG_W("start_new_document: phase: load_cached_locs");
   const bool loaded = load(epub.get_current_filename());
@@ -1274,7 +1283,11 @@ PageLocs::check_for_format_changes(int16_t count, int16_t itemref_index, bool fo
 
     if (!state_task.retriever_is_iddle()) {
       LOG_W("check_for_format_changes: phase: stop_document");
-      stop_document();
+      // (void)-cast: same rationale as start_new_document above —
+      // we're preparing a fresh format-change cycle, the START_
+      // DOCUMENT we send next doesn't touch state the wedged
+      // retriever holds.
+      (void) stop_document();
     }
 
     LOG_W("check_for_format_changes: phase: clear_pages_map");
