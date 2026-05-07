@@ -92,6 +92,37 @@ class EPub
     EPub();
    ~EPub();
 
+    /**
+     * @brief Parse an in-memory buffer into an xml_document, resetting
+     *        the document on parse failure.
+     *
+     * Several sites (encryption.xml, container.xml, OPF, NCX, per-
+     * item XHTML) all do the same `xml_document::load_buffer_inplace`
+     * dance with the same error-path obligation: on parse failure the
+     * doc must be reset() so subsequent reads on it return clean
+     * empty nodes rather than half-parsed garbage. Audit
+     * (02-models.md / 05-code-quality.md): two of the five sites
+     * (encryption, container.xml-local-doc) were missing the reset()
+     * — silent state leak; the next attempt to read from that
+     * document would observe partially-applied parse state.
+     *
+     * Buffer ownership stays with the CALLER. pugixml's
+     * load_buffer_inplace does not copy; the buffer must outlive
+     * the document. The keep-resident sites (encryption / OPF /
+     * NCX / per-item XHTML) hand the buffer to a member that's
+     * freed alongside the doc; the scan-and-drop sites (container.
+     * xml) free the buffer locally. Either way the caller knows
+     * the right lifetime; this helper just enforces the reset-
+     * on-failure invariant.
+     *
+     * @return true on parse success, false on failure (with doc
+     *         already reset and the LOG_E emitted).
+     */
+    static bool try_parse_xml(char *               buffer,
+                              uint32_t             size,
+                              pugi::xml_document & doc,
+                              const char *         site_tag);
+
     void                 retrieve_css(ItemInfo             & item         );
     void                   load_fonts();
 
