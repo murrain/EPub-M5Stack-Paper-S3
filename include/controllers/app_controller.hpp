@@ -21,17 +21,17 @@
  *   - BOOK:   Book content viewer
  *   - OPTION: Application options viewer and edition
  *   - TOC:    Currsent book Table of Content
- * 
- * Each Controller must implements the following methods (No use of abstract class):
- * 
- *   - enter()                            The controller is now receiving control
- *   - leave(bool going_to_deep_sleep)    The controller is loosing control
- *   - input_event(EventMgr::Event event) An input has been received from the user
- * 
- * All controllers are expected to be instanciated at boot time and always available.
- * Any new controller would require to modify the AppController methods to integrate it
- * in the main loop of activities.
- * 
+ *
+ * Each controller inherits from `Controller` (controller.hpp) and
+ * overrides enter() / leave(bool) / input_event(const Event &).
+ * AppController dispatches via a single switch in controller_for()
+ * — no parallel-switch lockstep edits required to add a controller.
+ *
+ * All controllers are expected to be instantiated at boot time and
+ * always available. Adding a new controller requires extending the
+ * Ctrl enum and adding a single case in controller_for(); failing
+ * to inherit from Controller is a compile error.
+ *
  */
 class AppController
 {
@@ -80,16 +80,6 @@ class AppController
     void going_to_deep_sleep();
     void launch();
 
-  private:
-    // Look up the concrete Controller for a Ctrl enum value.
-    // Returns nullptr for Ctrl::NONE / Ctrl::LAST. Single source
-    // of truth for the dispatch table; replaces four parallel
-    // switches that had to stay in lockstep when adding a
-    // controller. See comment at the definition for the
-    // compile-time enforcement story.
-    Controller * controller_for(Ctrl c);
-  public:
-
     // True if a controller transition has been requested (via
     // set_controller) but launch() hasn't yet processed it. Used by
     // BooksDirController::enter to gate the persistent menu strip
@@ -108,6 +98,14 @@ class AppController
     Ctrl current_ctrl;
     Ctrl next_ctrl;
     Ctrl last_ctrl[LAST_COUNT]; ///< LIFO of last controllers in use
+
+    // Look up the concrete Controller for a Ctrl enum value.
+    // Returns nullptr for Ctrl::NONE / Ctrl::LAST. Single source
+    // of truth for the dispatch table; replaces four parallel
+    // switches that had to stay in lockstep when adding a
+    // controller. See comment at the definition for the
+    // compile-time enforcement story.
+    Controller * controller_for(Ctrl c);
 };
 
 #if __APP_CONTROLLER__
