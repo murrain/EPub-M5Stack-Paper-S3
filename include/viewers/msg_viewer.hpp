@@ -19,6 +19,13 @@
  */
 class MsgViewer {
 
+  public:
+    // Declared up here (rather than in the natural public section
+    // below) so the private vshow() declaration just below can
+    // reference it without a forward-declaration dance — class-
+    // member enums can't be forward-declared cleanly.
+    enum MsgType { INFO, ALERT, BUG, BOOK, WIFI, NTP_CLOCK, CONFIRM };
+
   private:
     static constexpr char const * TAG = "MsgViewer";
 
@@ -55,7 +62,6 @@ class MsgViewer {
   public:
     MsgViewer() {};
 
-    enum MsgType { INFO, ALERT, BUG, BOOK, WIFI, NTP_CLOCK, CONFIRM };
     static char icon_char[7];
 
     // Lowest-level entry point. Direct callers are now rare — the
