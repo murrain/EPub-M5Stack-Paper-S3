@@ -172,6 +172,19 @@ class EPub
     inline const pugi::xml_document &              get_opf()       { return opf;                             }
     inline bool                      encryption_is_present() const { return encryption_present;              }
     inline const BinUUID &                    get_bin_uuid() const { return bin_uuid;                        }
+
+    // Predicate-chain accessors for the three top-level OPF
+    // sections. Replaces 12+ scattered `opf.find_child(package_pred).
+    // find_child(<section>_pred)` chains across epub.cpp and toc.cpp.
+    // Each returns an empty xml_node if the section is missing — the
+    // pugixml convention every existing call site already handles.
+    // Helpers live on EPub rather than as free functions so callers
+    // that hold a pointer to the OPF (TOC has `opf = &epub.get_opf()`)
+    // can switch to `epub.manifest_node()` etc. without restructuring.
+    pugi::xml_node    package_node();
+    pugi::xml_node   manifest_node();
+    pugi::xml_node      spine_node();
+    pugi::xml_node   metadata_node();
   };
 
 #if __EPUB__

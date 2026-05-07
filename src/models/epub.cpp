@@ -277,7 +277,7 @@ EPub::get_unique_identifier()
   xml_node      node, node2;
   const char  * id;
 
-  if ((node  = opf.find_child(package_pred)) &&
+  if ((node  = package_node()) &&
       (id    = node.attribute("unique-identifier").value()) &&
       (node2 = node.find_child(metadata_pred)) &&
       (node2.find_child_by_attribute("dc:identifier", "id", id))) {
@@ -394,7 +394,7 @@ EPub::get_opf(std::string & filename)
     }
 
     // Verifie that the OPF is of one of the version understood by this application
-    if (!((node = opf.find_child(package_pred)) && 
+    if (!((node = package_node()) && 
           (attr = node.find_attribute(xmlns_pred)) &&
           (strcmp(attr.value(), "http://www.idpf.org/2007/opf") == 0) &&
           (attr = node.attribute("version")) &&
@@ -763,7 +763,7 @@ EPub::get_item(pugi::xml_node itemref,
   bool completed = false;
 
   while (!completed) {
-    if (!((node = opf.find_child(package_pred).find_child(manifest_pred)) &&
+    if (!((node = manifest_node()) &&
           (node = one_by_attr(node, "item", "opf:item", "id", id)))) ERR(1);
 
     if (!(attr = node.attribute("media-type"))) ERR(2);
@@ -1044,6 +1044,17 @@ EPub::close_file()
   return true;
 }
 
+// Predicate-chain accessors. See header for rationale. The
+// non-trivial part is that pugixml's find_child(predicate) walks
+// children linearly and matches by predicate function — these
+// helpers cache nothing, they just compose two such walks. Total
+// cost per call is O(direct children) of <package> (typically 4-5)
+// for manifest/spine/metadata; acceptable.
+pugi::xml_node EPub::package_node()  { return opf.find_child(package_pred); }
+pugi::xml_node EPub::manifest_node() { return package_node().find_child(manifest_pred); }
+pugi::xml_node EPub::spine_node()    { return package_node().find_child(spine_pred); }
+pugi::xml_node EPub::metadata_node() { return package_node().find_child(metadata_pred); }
+
 bool
 EPub::quiesce_book_session()
 {
@@ -1066,7 +1077,7 @@ EPub::get_meta(const std::string & name)
 
   xml_node node;
   
-  if ((node = opf.find_child(package_pred).find_child(metadata_pred))) {
+  if ((node = metadata_node())) {
     return node.child_value(name.c_str());
   }
   return nullptr;
@@ -1090,12 +1101,11 @@ EPub::get_cover_filename()
 
   // First, try to find its from metadata
 
-  if ((node = opf.find_child(package_pred)
-                 .find_child(metadata_pred)) &&
+  if ((node = metadata_node()) &&
       (node = one_by_attr(node, "meta", "opf:meta", "name", "cover")) &&
       (itemref = node.attribute("content").value())) {
 
-    for (auto n : opf.find_child(package_pred).find_child(manifest_pred).children()) {
+    for (auto n : manifest_node().children()) {
       if ((strcmp(n.name(), "item") == 0) || (strcmp(n.name(), "opf:item") == 0)) {
         if ((((attr = n.attribute("id"        )) && (strcmp(attr.value(), itemref) == 0)) ||
             ((attr = n.attribute("properties")) && (strcmp(attr.value(), itemref) == 0))) &&
@@ -1109,7 +1119,7 @@ EPub::get_cover_filename()
 
   if (filename == nullptr) {
     // Look inside manifest
-    for (auto n : opf.find_child(package_pred).find_child(manifest_pred).children()) {
+    for (auto n : manifest_node().children()) {
       if ((strcmp(n.name(), "item") == 0) || (strcmp(n.name(), "opf:item") == 0)) {
         if ((attr = n.attribute("id")) && 
             ((strcmp(attr.value(), "cover-image") == 0) || 
@@ -1130,11 +1140,11 @@ EPub::get_item_count()
 {
   if (!file_is_open) return 0;
 
-  auto it = opf.find_child(package_pred).find_child(spine_pred).children("itemref");
+  auto it = spine_node().children("itemref");
   int16_t count = std::distance(it.begin(), it.end());
   
   if (count == 0) {
-    it = opf.find_child(package_pred).find_child(spine_pred).children("opf:itemref");
+    it = spine_node().children("opf:itemref");
     count = std::distance(it.begin(), it.end());
   }
 
@@ -1152,7 +1162,7 @@ EPub::get_item_at_index(int16_t itemref_index)
   xml_node node  = xml_node();
   int16_t  index = 0;
 
-  for (auto n : opf.find_child(package_pred).find_child(spine_pred).children()) {
+  for (auto n : spine_node().children()) {
     if (index == itemref_index) { node = n; break; }
     index++;
   }
@@ -1184,7 +1194,7 @@ EPub::get_item_at_index(int16_t    itemref_index,
     xml_node node = xml_node();
     int16_t index = 0;
 
-    for (auto n : opf.find_child(package_pred).find_child(spine_pred).children()) {
+    for (auto n : spine_node().children()) {
       if (index == itemref_index) { node = n; break; }
       index++;
     }
