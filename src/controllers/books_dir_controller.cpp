@@ -19,6 +19,7 @@
 #include "viewers/book_viewer.hpp"
 #include "viewers/linear_books_dir_viewer.hpp"
 #include "viewers/matrix_books_dir_viewer.hpp"
+#include "viewers/msg_viewer.hpp"
 #include "screen.hpp"
 
 #include <cassert>
@@ -209,6 +210,30 @@ BooksDirController::show_last_book()
     book_title  = book->title;
     if (book_controller.open_book_file(book_title, book_fname, book_page_id)) {
       app_controller.set_controller(AppController::Ctrl::BOOK);
+    }
+    else {
+      // Open failed (most commonly: page_locs.retrieve_asap timed out
+      // because the retriever is wedged on a malformed embedded font
+      // or runaway layout). The runtime member book_was_shown is
+      // already false (set at line ~203), so this enter() won't loop;
+      // but NVS still records was_shown=1 from the previous deep
+      // sleep, which would re-trap the user on the very next cold
+      // boot. Persist was_shown=0 immediately so a power cycle lands
+      // them in the books-dir UI instead of replaying the wedge.
+      //
+      // The user can still tap the offending book to retry — that's
+      // a deliberate action and they'll see the same diagnostic msg
+      // and a fast bail. This is the loop-breaker, not a permanent
+      // skip.
+      save_last_book(book_page_id, false);
+
+      msg_viewer.show(
+        MsgViewer::MsgType::ALERT,
+        false, true,
+        "Could not open book",
+        "\"%s\" could not be opened. Returning to the library. "
+        "Pick another book to continue.",
+        book_title.c_str());
     }
   }
 }

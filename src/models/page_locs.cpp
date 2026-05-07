@@ -8,10 +8,12 @@
 #include "models/toc.hpp"
 #include "models/config.hpp"
 #include "models/fonts.hpp"
+#include "models/epub.hpp"
 #include "controllers/event_mgr.hpp"
 #include "viewers/screen_bottom.hpp"
 
 #include "viewers/book_viewer.hpp"
+#include "viewers/msg_viewer.hpp"
 #include "viewers/page.hpp"
 
 #include <iostream>
@@ -46,6 +48,12 @@ struct RetrieveQueueData {
   RetrieveReq req;
   int16_t itemref_index;
 };
+
+// Foreground-side bounded waits on the retriever's reply queues.
+// Sized as broken-book detectors, not expected waits — see the
+// commentary at the call sites and at queue_receive_timed_ms.
+static constexpr uint32_t RETRIEVE_ASAP_TIMEOUT_MS  = 10000;  // 10 s
+static constexpr uint32_t STOP_DOCUMENT_TIMEOUT_MS  =  5000;  //  5 s
 
 #if EPUB_LINUX_BUILD
   #include <chrono>
@@ -107,6 +115,38 @@ struct RetrieveQueueData {
   #define QUEUE_SEND(q, m, t)        xQueueSend(q, &m, t)
   #define QUEUE_RECEIVE(q, m, t)  xQueueReceive(q, &m, t)
 #endif
+
+// Bounded wait on a reply queue. Returns true on receive, false on
+// timeout. Used by retrieve_asap and stop_document so the foreground
+// can recover from a wedged retriever (e.g. FreeType infinite loop on
+// a malformed embedded font, runaway CSS/layout) rather than blocking
+// the panel forever on portMAX_DELAY. The retrieve_asap path was the
+// concrete trigger: La Belgariade got the device stuck on "Retrieving
+// Font(s)" indefinitely with no way out short of pulling the SD card.
+static bool
+queue_receive_timed_ms(
+    #if EPUB_LINUX_BUILD
+      mqd_t           q,
+    #else
+      QueueHandle_t   q,
+    #endif
+    MgrQueueData &  data,
+    uint32_t        timeout_ms)
+{
+  #if EPUB_LINUX_BUILD
+    struct timespec deadline;
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    deadline.tv_sec  +=  timeout_ms / 1000;
+    deadline.tv_nsec += (timeout_ms % 1000) * 1000000L;
+    if (deadline.tv_nsec >= 1000000000L) {
+      deadline.tv_sec  += 1;
+      deadline.tv_nsec -= 1000000000L;
+    }
+    return mq_timedreceive(q, (char *) &data, sizeof(data), nullptr, &deadline) != -1;
+  #else
+    return xQueueReceive(q, &data, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+  #endif
+}
 
 // =====================================================================
 // STOP / STOPPED handshake invariant
@@ -525,7 +565,25 @@ class RetrieverTask
           LOG_D("-> %s <-", (retrieve_queue_data.req == RetrieveReq::GET_ASAP) ? "GET_ASAP" : "RETRIEVE_ITEM");
 
           LOG_D("Retrieving itemref --> %d <--", retrieve_queue_data.itemref_index);
-          
+
+          // Per-item progress for the panel. The retriever runs a
+          // long silent paginate-the-whole-book pass after the first
+          // page is shown; before this, the user saw a stale "Retrieving
+          // Font(s)" message indefinitely on a wedged item with no
+          // signal of what step we were on. Shown only on GET_ASAP
+          // (foreground-blocking item retrievals) so background
+          // pagination doesn't redraw the panel underneath an
+          // already-rendered book page.
+          if (retrieve_queue_data.req == RetrieveReq::GET_ASAP) {
+            const int16_t cur   = retrieve_queue_data.itemref_index + 1;
+            const int16_t total = epub.get_item_count();
+            msg_viewer.show(MsgViewer::MsgType::INFO,
+                            false, false,
+                            "Loading book",
+                            "Paginating chapter %d of %d. Please wait.",
+                            (int) cur, (int) total);
+          }
+
           int16_t itemref_index;
           if (!page_locs.build_page_locs(retrieve_queue_data.itemref_index)) {
             // Unable to retrieve pages location for the requested index. Send back
@@ -888,10 +946,48 @@ PageLocs::retrieve_asap(int16_t itemref_index)
   // the .req field anyway (always "ASAP_READY") keeps the trace
   // shape stable for any external log-watcher and earns the
   // discriminator field its keep.
-  QUEUE_RECEIVE(asap_queue, mgr_queue_data, portMAX_DELAY);
-  LOG_D("-> %s <-", (mgr_queue_data.req == MgrReq::ASAP_READY) ? "ASAP_READY" : "?");
+  //
+  // Bounded wait: if the retriever is genuinely wedged (a malformed
+  // embedded font that loops FreeType, runaway CSS/layout for a
+  // single item, etc.) the foreground would otherwise block the
+  // panel forever on portMAX_DELAY — the symptom that wedged the
+  // device on La Belgariade with no way out short of pulling the SD
+  // card. RETRIEVE_ASAP_TIMEOUT_MS is a "broken book detector," not
+  // an expected wait: a healthy book paginates the requested item
+  // in <2s, so 10s leaves comfortable headroom on a slow SD without
+  // letting a stuck retriever wedge the UI indefinitely.
+  const bool got_reply = queue_receive_timed_ms(asap_queue, mgr_queue_data,
+                                                RETRIEVE_ASAP_TIMEOUT_MS);
   relax = false;
 
+  if (!got_reply) {
+    LOG_E("retrieve_asap: %u ms timeout for itemref=%d. "
+          "Retriever appears wedged; aborting load.",
+          (unsigned) RETRIEVE_ASAP_TIMEOUT_MS, (int) itemref_index);
+    // Deliberately NOT calling stop_document() here. Two reasons:
+    //
+    // 1. If the retriever is hung deep inside FreeType (the most
+    //    likely failure mode) it's holding the Fonts mutex.
+    //    EPub::close_file() — which BooksDirController::enter()
+    //    invokes after stop_document() returns — calls fonts.clear()
+    //    which tries to acquire that same mutex, deadlocking the
+    //    foreground. Better to leave the retriever leaked than to
+    //    cascade the wedge into the cleanup path.
+    //
+    // 2. open_book_file's failure handling (book_was_shown=false +
+    //    NVS clear in BooksDirController::show_last_book) is enough
+    //    to break the auto-resume loop. The user can power-cycle if
+    //    the leaked retriever causes subsequent book opens to behave
+    //    oddly; that's a vastly better outcome than the SD-card-pull
+    //    they had to do before this fix.
+    //
+    // The state_task is left in "waiting_for_itemref != -1" /
+    // "retriever_iddle = false" state. The next start_new_document
+    // observes that and calls stop_document, which now hits its own
+    // 5 s timeout and proceeds. Healthy books will then work; only
+    // a re-attempt of the same wedge-trigger book will fail again.
+    return false;
+  }
   return true;
 }
 
@@ -914,7 +1010,24 @@ PageLocs::stop_document()
   // asap_queue. No reply-type mismatch is possible — the receive
   // either delivers a STOPPED or blocks forever (which would
   // indicate a missing send, not a wrong-type send).
-  QUEUE_RECEIVE(stopped_queue, mgr_queue_data, portMAX_DELAY);
+  //
+  // Bounded wait for the same reason retrieve_asap is bounded: a
+  // wedged retriever (FreeType infinite loop, etc.) would otherwise
+  // never confirm STOPPED. STOP_DOCUMENT_TIMEOUT_MS is short — by
+  // the time we reach stop_document the retriever has either
+  // observed the aborting flag (cooperative_check yields every page
+  // and a few hundred milliseconds is the worst-case build_pages_
+  // recurse settling time on a healthy item) or it's hung. Any
+  // longer just delays the foreground without changing the
+  // outcome.
+  if (!queue_receive_timed_ms(stopped_queue, mgr_queue_data,
+                              STOP_DOCUMENT_TIMEOUT_MS)) {
+    LOG_E("stop_document: %u ms timeout. Retriever did not confirm "
+          "STOPPED — proceeding anyway. Subsequent operations may be "
+          "unreliable until power cycle.",
+          (unsigned) STOP_DOCUMENT_TIMEOUT_MS);
+    return;
+  }
   LOG_D("-> %s <-", (mgr_queue_data.req == MgrReq::STOPPED) ? "STOPPED" : "?");
 
   // Retriever is now confirmed idle; safe to free the per-item state
