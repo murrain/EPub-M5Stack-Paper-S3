@@ -577,8 +577,6 @@ EPub::retrieve_fonts_from_css(CSS & css)
     
     if (font_rules.empty()) return;
 
-    bool first = true;
-
     for (auto & rule : font_rules) {
       const CSS::Values * values;
       if ((values = css.get_values_from_props(*rule.second, CSS::PropertyId::FONT_FAMILY))) {
@@ -602,16 +600,22 @@ EPub::retrieve_fonts_from_css(CSS & css)
               (!values->empty()) &&
               (values->front()->value_type == CSS::ValueType::URL)) {
 
-            if (first) {
-              first = false;
-              LOG_D("Displaying font loading msg.");
-              msg_viewer.show(
-                MsgViewer::MsgType::INFO, 
-                false, false, 
-                "Retrieving Font(s)", 
-                "The application is retrieving font(s) from the EPub file. Please wait."
-              );
-            }
+            // Per-font progress on the panel. Replaces the previous
+            // one-shot "Retrieving Font(s)" message that showed once
+            // and then never updated — leaving the panel stuck on
+            // the same string regardless of which font (or how many
+            // more) were still pending. With the family name shown
+            // per load, a stuck FreeType parse can be pinpointed to
+            // the specific @font-face rule rather than blamed on
+            // "fonts" generally.
+            LOG_D("Loading embedded font: %s", font_family.c_str());
+            msg_viewer.show(
+              MsgViewer::MsgType::INFO,
+              false, false,
+              "Loading book",
+              "Loading font: %s",
+              font_family.c_str()
+            );
 
             std::string filename = css.get_folder_path() + values->front()->str;
             filename = filename_locate(filename.c_str());
