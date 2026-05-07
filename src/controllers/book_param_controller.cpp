@@ -125,20 +125,14 @@ revert_to_defaults()
   book_params->put(BookParams::Ident::FONT,              default_value);
   book_params->put(BookParams::Ident::USE_FONTS_IN_BOOK, default_value);
 
+  // update_book_format_params now handles wake_snapshot.invalidate
+  // and page_cache.invalidate_all internally — see the doc comment
+  // on the method in epub.hpp for the rationale (was previously
+  // open-coded here and forgotten in option_controller, which the
+  // overnight audit caught).
   epub.update_book_format_params();
 
   book_params->save();
-
-  // Format params changed: any cached wake snapshot now reflects an
-  // outdated layout. Drop both the in-memory and on-disk copies so
-  // the next wake takes the normal boot rendering path instead of
-  // flashing the stale snapshot for ~2-4 s before the real render
-  // overwrites it. PageCache entries' format_hash check would catch
-  // this lazily, but explicit invalidate_all reclaims the slots
-  // immediately for the next ±N residency request rather than
-  // waiting for stale entries to be evicted by request_residency.
-  wake_snapshot.invalidate();
-  page_cache.invalidate_all();
 
   msg_viewer.show(MsgViewer::MsgType::INFO,
                   false, false,
@@ -370,14 +364,11 @@ BookParamController::dispatch_to_sub_state(
 
       if (book_params->is_modified()) {
         page_locs.stop_document();
+        // update_book_format_params now invalidates wake_snapshot
+        // and page_cache internally — both reflected the OLD
+        // layout and would repaint stale content otherwise. See
+        // epub.hpp doc comment.
         epub.update_book_format_params();
-        // See revert_to_defaults above: format-param edits make
-        // the snapshot's layout obsolete. Drop it so warm wake
-        // takes the normal boot path instead of painting stale.
-        // PageCache likewise invalidates so the next ±N residency
-        // request renders fresh entries against the new format.
-        wake_snapshot.invalidate();
-        page_cache.invalidate_all();
       }
 
       book_params->save();

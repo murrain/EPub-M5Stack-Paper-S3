@@ -94,6 +94,34 @@ class EPub
 
     void                 retrieve_css(ItemInfo             & item         );
     void                   load_fonts();
+
+    /**
+     * @brief Refresh book_format_params from book_params + config.
+     *
+     * Recomputes the cached `book_format_params` struct by reading
+     * the per-book `book_params` (FONT, FONT_SIZE, etc.) with
+     * fallback to the global `config` (DEFAULT_FONT, etc.) for
+     * any field set to the -1 sentinel.
+     *
+     * @param invalidate_dependent_caches Default true. After the
+     *        recompute, drops PageCache entries and the warm-wake
+     *        snapshot — both reflect the OLD layout and would
+     *        repaint stale content if read after a format change.
+     *        Pass false ONLY from EPub::open_file, which calls
+     *        this on a fresh book where the cache is already
+     *        empty (close_file just ran) AND we want to PRESERVE
+     *        any warm-wake snapshot that may match the just-opened
+     *        book id (open_file is the entry point for warm wake).
+     *
+     * Previously the invalidation lived as scattered calls in
+     * book_param_controller (always remembered) and option_controller
+     * (forgotten — see audit 00-summary.md "🟡 option_controller
+     * doesn't invalidate page_cache after format-param changes").
+     * Centralizing here fixes the bug AND removes 4 sites of
+     * duplication.
+     */
+    void update_book_format_params(bool invalidate_dependent_caches = true);
+
     void              clear_item_data(ItemInfo             & item         );
     void                  open_params(const std::string    & epub_filename);
     bool                    open_file(const std::string    & epub_filename);
@@ -135,7 +163,9 @@ class EPub
     bool                     get_keys();
     std::string       filename_locate(const char           * fname        );
     int16_t            get_item_count();
-    void    update_book_format_params();
+    // Declaration moved to public section above (lines 99-127) and
+    // gained a bool parameter for cache invalidation. Old void
+    // signature deleted.
     ObfuscationType get_file_obfuscation(const char        * filename     );
     void                      decrypt(void                 * buffer, 
                                       const uint32_t         size,
