@@ -209,7 +209,9 @@ BooksDirController::show_last_book()
     book_fname += book->filename;
     book_title  = book->title;
     if (book_controller.open_book_file(book_title, book_fname, book_page_id)) {
+      LOG_W("show_last_book: phase: set_controller(BOOK)");
       app_controller.set_controller(AppController::Ctrl::BOOK);
+      LOG_W("show_last_book: phase: set_controller_returned");
     }
     else {
       // Open failed (most commonly: page_locs.retrieve_asap timed out
@@ -496,7 +498,9 @@ BooksDirController::refresh_view()
             #endif
 
             if (book_controller.open_book_file(book_title, book_fname, page_id)) {
+              LOG_W("input_event_TAP: phase: set_controller(BOOK)");
               app_controller.set_controller(AppController::Ctrl::BOOK);
+              LOG_W("input_event_TAP: phase: set_controller_returned");
             }
           }
         }
