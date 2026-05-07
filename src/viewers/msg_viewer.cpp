@@ -40,7 +40,7 @@ void MsgViewer::show_alert(const char * title, const char * fmt_str, ...)
   va_end(args);
 }
 
-void MsgViewer::show_alert_fatal(const char * title, const char * fmt_str, ...)
+void MsgViewer::show_alert_fullscreen(const char * title, const char * fmt_str, ...)
 {
   va_list args;
   va_start(args, fmt_str);

@@ -229,7 +229,7 @@ BooksDirController::show_last_book()
       // skip.
       save_last_book(book_page_id, false);
 
-      msg_viewer.show_alert_fatal(
+      msg_viewer.show_alert_fullscreen(
         "Could not open book",
         "\"%s\" could not be opened. Returning to the library. "
         "Pick another book to continue.",

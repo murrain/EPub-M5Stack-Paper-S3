@@ -78,23 +78,29 @@ class MsgViewer {
 
     // ----- Typed wrappers for the common message shapes. -----
     //
-    // Naming convention:
+    // Naming convention: each wrapper is named for the bool combo
+    // it sets, NOT for the caller's intent. This avoids the trap
+    // where a wrapper named after a use case (e.g. "fatal") drifts
+    // when reused for a structurally identical but semantically
+    // different case (e.g. recoverable error that returns to
+    // library).
+    //
     //   show_<kind>            : in-session overlay (clear_screen=false,
     //                            press_a_key=false). Painted on top of
     //                            existing content; brief.
     //   show_<kind>_fullscreen : full-screen splash (clear_screen=true,
-    //                            press_a_key=false). At boot or after
-    //                            a state-resetting action.
-    //   show_<kind>_fatal      : ALERT-only fatal-class fullscreen
-    //                            (caller is about to enter deep sleep).
+    //                            press_a_key=false). Boot errors,
+    //                            recoverable errors that return to a
+    //                            different controller, restart prompts.
     //   show_confirm           : CONFIRM with the OK/cancel handshake
     //                            (press_a_key=true, clear_screen=false).
 
     /** ALERT, in-session overlay. clear_screen=false, press_a_key=false. */
     void show_alert(const char * title, const char * fmt_str, ...);
 
-    /** ALERT, fullscreen at boot or before deep sleep. (false, true). */
-    void show_alert_fatal(const char * title, const char * fmt_str, ...);
+    /** ALERT, fullscreen takeover. (false, true). Boot/hardware/config errors,
+     *  recoverable errors that bounce the user to a different controller. */
+    void show_alert_fullscreen(const char * title, const char * fmt_str, ...);
 
     /** INFO, in-session overlay. (false, false). Most common shape. */
     void show_info(const char * title, const char * fmt_str, ...);

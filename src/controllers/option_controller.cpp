@@ -245,7 +245,7 @@ usb_drive_mode()
       default:
         step = "unknown"; break;
     }
-    msg_viewer.show_alert_fatal(
+    msg_viewer.show_alert_fullscreen(
                     "USB Drive Mode failed",
                     "Init failed at: %s (esp_err=%d). The device will "
                     "continue normally; please try again.",
