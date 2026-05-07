@@ -7,6 +7,7 @@
 #if EPUB_INKPLATE_BUILD
 
 #include "viewers/wallpaper_viewer.hpp"
+#include "viewers/centered_layout.hpp"
 #include "viewers/page.hpp"
 #include "models/epub.hpp"
 #include "models/page_locs.hpp"
@@ -24,37 +25,24 @@
 
 namespace
 {
-  constexpr int16_t PAD     = 52;  // text left/right margin
-  constexpr int16_t F_OUTER = 14;  // outer border inset from screen edge
-  constexpr int16_t F_INNER = 24;  // inner border inset
+  using CenteredLayout::PAD;            // shared text left/right margin
+  using CenteredLayout::put_centered;
+  using CenteredLayout::draw_hrule;
 
-  Page::Format make_fmt(int8_t font_index, int16_t font_size,
-                        Fonts::FaceStyle style, CSS::Align align)
+  constexpr int16_t F_OUTER = 14;       // outer border inset from screen edge
+  constexpr int16_t F_INNER = 24;       // inner border inset
+
+  // line_height_factor for this viewer's text. The shared
+  // CenteredLayout::make_fmt takes it as a parameter; usb_msc uses
+  // 1.15, this viewer uses 1.1. Both values were tuned by hand
+  // for their respective content density; keep them per-viewer.
+  constexpr double LINE_HEIGHT_FACTOR = 1.1;
+
+  inline Page::Format make_fmt(int8_t font_index, int16_t font_size,
+                               Fonts::FaceStyle style, CSS::Align align)
   {
-    Page::Format fmt = {
-      .line_height_factor = 1.1,
-      .font_index         = font_index,
-      .font_size          = font_size,
-      .indent             = 0,
-      .margin_left        = 0,
-      .margin_right       = 0,
-      .margin_top         = 0,
-      .margin_bottom      = 0,
-      .screen_left        = PAD,
-      .screen_right       = PAD,
-      .screen_top         = 0,
-      .screen_bottom      = 0,
-      .width              = 0,
-      .height             = 0,
-      .vertical_align     = 0,
-      .trim               = true,
-      .pre                = false,
-      .font_style         = style,
-      .align              = align,
-      .text_transform     = CSS::TextTransform::NONE,
-      .display            = CSS::Display::INLINE
-    };
-    return fmt;
+    return CenteredLayout::make_fmt(font_index, font_size, style, align,
+                                    LINE_HEIGHT_FACTOR);
   }
 
   // Split `text` at a word boundary near `max_chars`.
@@ -76,22 +64,6 @@ namespace
       if (cut == 0) cut = (size_t)max_chars;
       second = second.substr(0, cut) + "...";
     }
-  }
-
-  void put_centered(const std::string & text, int16_t y, Page::Format & fmt)
-  {
-    fmt.align = CSS::Align::CENTER;
-    page.put_str_at(text, Pos(Page::HORIZONTAL_CENTER, y), fmt);
-  }
-
-  // Horizontal rule: PAD + inset on each side, optional thickness.
-  void draw_hrule(int16_t W, int16_t y, int16_t inset, int16_t thickness = 1)
-  {
-    int16_t left  = PAD + inset;
-    int16_t width = W - 2*(PAD + inset);
-    if (width <= 0) return;
-    screen.colorize_region(Dim((uint16_t)width, (uint16_t)thickness),
-                           Pos(left, y), Screen::BLACK_COLOR);
   }
 
   // 3-px thick outer border built from four filled strips.
