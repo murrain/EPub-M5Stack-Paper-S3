@@ -11,6 +11,7 @@
 #include "models/page_cache.hpp"
 #include "models/page_locs.hpp"
 #include "models/image_factory.hpp"
+#include "models/wake_snapshot.hpp"
 #include "viewers/msg_viewer.hpp"
 #include "viewers/book_viewer.hpp"
 #include "helpers/unzip.hpp"
@@ -841,8 +842,8 @@ EPub::get_item(pugi::xml_node itemref,
   return completed;
 }
 
-void 
-EPub::update_book_format_params()
+void
+EPub::update_book_format_params(bool invalidate_dependent_caches)
 {
   constexpr int8_t default_value = -1;
 
@@ -873,6 +874,16 @@ EPub::update_book_format_params()
   if (book_format_params.font              == default_value) config.get(Config::Ident::DEFAULT_FONT,       &book_format_params.font             );
 
   //if (!book_format_params.use_fonts_in_book) fonts.clear();
+
+  // Layout-dependent caches are now stale. Drop them so the next
+  // ±N residency request (page_cache) and warm wake (wake_snapshot)
+  // build fresh against the new format. Skipped only on the
+  // open_file path, where the page cache was just emptied by
+  // close_file and we WANT to preserve any matching wake_snapshot.
+  if (invalidate_dependent_caches) {
+    page_cache.invalidate_all();
+    wake_snapshot.invalidate();
+  }
 }
 
 void
@@ -932,7 +943,10 @@ EPub::open_file(const std::string & epub_filename)
   LOG_W("open_file phase: open_params");
   open_params(epub_filename);
   LOG_W("open_file phase: update_book_format_params");
-  update_book_format_params();
+  // invalidate_dependent_caches=false: page_cache was just emptied
+  // by close_file, and any matching wake_snapshot needs to survive
+  // for warm-wake-into-this-book to paint instantly.
+  update_book_format_params(/*invalidate_dependent_caches=*/false);
 
   // No page_locs.stop_document() / page_cache.invalidate_all()
   // hoist needed here (unlike BookParamController /
