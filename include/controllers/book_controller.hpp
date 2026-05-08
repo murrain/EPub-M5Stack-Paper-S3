@@ -28,17 +28,19 @@ class BookController : public Controller
     inline const PageLocs::PageId & get_current_page_id() { return current_page_id; }
     inline void set_current_page_id(const PageLocs::PageId & page_id) { current_page_id = page_id; }
 
-  private:
-    static constexpr char const * TAG = "BookController";
-
-    PageLocs::PageId current_page_id;
-
     // Wraps book_viewer.show_page + WakeSnapshot::capture so the
     // renderer stays decoupled from the books_dir / wake-snapshot
     // subsystems. Every navigation handler in this file should go
     // through here rather than calling book_viewer.show_page
     // directly — that's what keeps the capture coverage complete.
+    // Public so sub-state controllers (BookParamController) can
+    // redraw the underlying book page when their overlay closes.
     void show_and_capture(const PageLocs::PageId & page_id);
+
+  private:
+    static constexpr char const * TAG = "BookController";
+
+    PageLocs::PageId current_page_id;
 };
 
 #if __BOOK_CONTROLLER__
