@@ -3,7 +3,7 @@
 An EPub reader for the **M5Stack Paper S3** (ESP32-S3), forked from [EPub-InkPlate](https://github.com/turgu1/EPub-InkPlate) by turgu1.
 
 - **Upstream**: https://github.com/turgu1/EPub-InkPlate
-- **This fork**: https://github.com/juicecultus/EPub-M5Stack-Paper-S3
+- **This fork**: https://github.com/murrain/EPub-M5Stack-Paper-S3
 
 ---
 
@@ -95,7 +95,7 @@ The library scan (which builds `books_dir.db`) runs on a dedicated worker thread
 ## Quick start
 
 ```bash
-git clone --recurse-submodules https://github.com/juicecultus/EPub-M5Stack-Paper-S3.git
+git clone --recurse-submodules https://github.com/murrain/EPub-M5Stack-Paper-S3.git
 cd EPub-M5Stack-Paper-S3
 
 # Build
