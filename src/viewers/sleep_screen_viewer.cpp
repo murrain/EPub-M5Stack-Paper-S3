@@ -226,9 +226,7 @@ void SleepScreenViewer::show()
   // ── Try a painting wallpaper first ───────────────────────────────────────
   bool has_wallpaper = WallpaperViewer::show_random();
 
-  if (has_wallpaper) {
-    draw_wallpaper_caption(W, H);
-  } else {
+  if (!has_wallpaper) {
     // ── Geometric lock-screen design ───────────────────────────────────────
 
     // Picture-frame border: 3-px outer + 1-px inner + corner squares.
@@ -309,6 +307,14 @@ void SleepScreenViewer::show()
   // Full GC16 refresh — clean panel for the long retention period.
   screen.force_full_update();
   page.paint(false);
+
+  // Paint the wallpaper caption AFTER the GC16 as a fast DU stamp.
+  // This is the last visible change before deep sleep — the appearance
+  // of the caption text is the indicator that sleep has been engaged.
+  if (has_wallpaper) {
+    draw_wallpaper_caption(W, H);
+    screen.update(Screen::UpdateMode::FAST);
+  }
 }
 
 #endif
